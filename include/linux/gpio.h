@@ -261,4 +261,10 @@ static inline void devm_gpio_free(struct device *dev, unsigned int gpio)
 
 #endif /* ! CONFIG_GPIOLIB */
 
+#ifdef CONFIG_DEBUG_FS
+int msm_gpio_dump(struct seq_file *s);
+int pmic_gpio_dump(struct seq_file *s);
+extern bool pm_gpio_debug_mask;
+#endif /* CONFIG_DEBUG_FS */
+
 #endif /* __LINUX_GPIO_H */

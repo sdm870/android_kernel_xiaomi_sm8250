@@ -2,7 +2,7 @@
 #ifndef UAPI_UFS_H_
 #define UAPI_UFS_H_
 
-#define MAX_QUERY_IDN	0x12
+#define MAX_QUERY_IDN	0x20
 
 /* Flag idn for Query Requests*/
 enum flag_idn {
@@ -20,6 +20,8 @@ enum flag_idn {
 	QUERY_FLAG_IDN_WB_EN                            = 0x0E,
 	QUERY_FLAG_IDN_WB_BUFF_FLUSH_EN                 = 0x0F,
 	QUERY_FLAG_IDN_WB_BUFF_FLUSH_DURING_HIBERN8     = 0x10,
+	/* use one reserved bit */
+	QUERY_FLAG_IDN_MANUAL_GC_CONT                   = 0x0E,
 };
 
 /* Attribute idn for Query requests */
@@ -42,8 +44,8 @@ enum attr_idn {
 	QUERY_ATTR_IDN_SECONDS_PASSED           = 0x0F,
 	QUERY_ATTR_IDN_CNTX_CONF                = 0x10,
 	QUERY_ATTR_IDN_CORR_PRG_BLK_NUM         = 0x11,
-	QUERY_ATTR_IDN_RESERVED2                = 0x12,
-	QUERY_ATTR_IDN_RESERVED3                = 0x13,
+	QUERY_ATTR_IDN_MANUAL_GC_CONT		= 0x12,
+	QUERY_ATTR_IDN_MANUAL_GC_STATUS_1	= 0x13,
 	QUERY_ATTR_IDN_FFU_STATUS               = 0x14,
 	QUERY_ATTR_IDN_PSA_STATE                = 0x15,
 	QUERY_ATTR_IDN_PSA_DATA_SIZE            = 0x16,
@@ -52,6 +54,8 @@ enum attr_idn {
 	QUERY_ATTR_IDN_AVAIL_WB_BUFF_SIZE       = 0x1D,
 	QUERY_ATTR_IDN_WB_BUFF_LIFE_TIME_EST    = 0x1E,
 	QUERY_ATTR_IDN_CURR_WB_BUFF_SIZE        = 0x1F,
+	/* use one reserved bit */
+	QUERY_ATTR_IDN_MANUAL_GC_STATUS         = 0x17,
 };
 
 #define QUERY_ATTR_IDN_BOOT_LU_EN_MAX	0x02

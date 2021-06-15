@@ -160,6 +160,11 @@ static void driver_deferred_probe_trigger(void)
 	if (!driver_deferred_probe_enable)
 		return;
 
+	driver_deferred_probe_force_trigger();
+}
+
+void driver_deferred_probe_force_trigger(void)
+{
 	/*
 	 * A successful probe means that all the devices in the pending list
 	 * should be triggered to be reprobed.  Move all the deferred devices
@@ -176,6 +181,11 @@ static void driver_deferred_probe_trigger(void)
 	 * safe to kick it again.
 	 */
 	schedule_work(&deferred_probe_work);
+}
+
+void driver_deferred_probe_flush(void)
+{
+	flush_work(&deferred_probe_work);
 }
 
 /**

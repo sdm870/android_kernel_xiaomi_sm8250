@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2021 XiaoMi, Inc.
  */
 
 #include <linux/syscore_ops.h>
@@ -214,19 +215,12 @@ void inc_rq_walt_stats(struct rq *rq, struct task_struct *p)
 {
 	inc_nr_big_task(&rq->walt_stats, p);
 	walt_inc_cumulative_runnable_avg(rq, p);
-
-	p->rtg_high_prio = task_rtg_high_prio(p);
-	if (p->rtg_high_prio)
-		rq->walt_stats.nr_rtg_high_prio_tasks++;
-
 }
 
 void dec_rq_walt_stats(struct rq *rq, struct task_struct *p)
 {
 	dec_nr_big_task(&rq->walt_stats, p);
 	walt_dec_cumulative_runnable_avg(rq, p);
-	if (p->rtg_high_prio)
-		rq->walt_stats.nr_rtg_high_prio_tasks--;
 }
 
 void fixup_walt_sched_stats_common(struct rq *rq, struct task_struct *p,
@@ -2661,6 +2655,7 @@ static void transfer_busy_time(struct rq *rq, struct related_thread_group *grp,
  * Enable colocation and frequency aggregation for all threads in a process.
  * The children inherits the group id from the parent.
  */
+unsigned int __read_mostly sysctl_sched_enable_thread_grouping;
 unsigned int __read_mostly sysctl_sched_coloc_downmigrate_ns;
 
 struct related_thread_group *related_thread_groups[MAX_NUM_CGROUP_COLOC_ID];
@@ -2932,25 +2927,34 @@ void add_new_task_to_grp(struct task_struct *new)
 {
 	unsigned long flags;
 	struct related_thread_group *grp;
+	struct task_struct *leader = new->group_leader;
+	unsigned int leader_grp_id = sched_get_group_id(leader);
 
-	/*
-	 * If the task does not belong to colocated schedtune
-	 * cgroup, nothing to do. We are checking this without
-	 * lock. Even if there is a race, it will be added
-	 * to the co-located cgroup via cgroup attach.
-	 */
-	if (!schedtune_task_colocated(new))
+	if (!sysctl_sched_enable_thread_grouping &&
+	    leader_grp_id != DEFAULT_CGROUP_COLOC_ID)
 		return;
 
-	grp = lookup_related_thread_group(DEFAULT_CGROUP_COLOC_ID);
+	if (thread_group_leader(new))
+		return;
+
+	if (leader_grp_id == DEFAULT_CGROUP_COLOC_ID) {
+		if (!same_schedtune(new, leader))
+			return;
+	}
+
 	write_lock_irqsave(&related_thread_group_lock, flags);
+
+	rcu_read_lock();
+	grp = task_related_thread_group(leader);
+	rcu_read_unlock();
 
 	/*
 	 * It's possible that someone already added the new task to the
-	 * group. or it might have taken out from the colocated schedtune
-	 * cgroup. check these conditions under lock.
+	 * group. A leader's thread group is updated prior to calling
+	 * this function. It's also possible that the leader has exited
+	 * the group. In either case, there is nothing else to do.
 	 */
-	if (!schedtune_task_colocated(new) || new->grp) {
+	if (!grp || new->grp) {
 		write_unlock_irqrestore(&related_thread_group_lock, flags);
 		return;
 	}

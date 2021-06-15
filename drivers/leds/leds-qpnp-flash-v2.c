@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+<<<<<<< HEAD
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2021 XiaoMi, Inc.
+=======
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+>>>>>>> f50521fa0d1f7630a6a1c819f4910f080c623fb7
  */
 
 #define pr_fmt(fmt)	"flashv2: %s: " fmt, __func__
@@ -84,6 +89,14 @@
 
 #define	FLASH_LED_REG_THERMAL_DEBOUNCE(base)	(base + 0x5A)
 #define	FLASH_LED_THERMAL_DEBOUNCE_MASK		GENMASK(1, 0)
+
+#define	FLASH_LED_REG_RGLR_RAMP_RATE(base)	(base + 0x5B)
+#define	FLASH_LED_RAMP_UP_STEP_MASK		GENMASK(6, 4)
+#define	FLASH_LED_RAMP_UP_STEP_SHIFT		4
+#define	FLASH_LED_RAMP_DOWN_STEP_MASK		GENMASK(2, 0)
+#define	FLASH_LED_RAMP_STEP_MIN_NS		200
+#define	FLASH_LED_RAMP_STEP_MAX_NS		25600
+#define	FLASH_LED_RAMP_STEP_DEFAULT_NS		6400
 
 #define	FLASH_LED_REG_VPH_DROOP_THRESHOLD(base)	(base + 0x61)
 #define	FLASH_LED_VPH_DROOP_HYSTERESIS_MASK	GENMASK(5, 4)
@@ -278,6 +291,8 @@ struct flash_led_platform_data {
 	int			thermal_thrsh1;
 	int			thermal_thrsh2;
 	int			thermal_thrsh3;
+	int			ramp_up_step;
+	int			ramp_down_step;
 	int			hw_strobe_option;
 	u32			led1n2_iclamp_low_ma;
 	u32			led1n2_iclamp_mid_ma;
@@ -347,7 +362,12 @@ static int max_ires_curr_ma_table[MAX_IRES_LEVELS] = {
 	FLASH_LED_IRES12P5_MAX_CURR_MA, FLASH_LED_IRES10P0_MAX_CURR_MA,
 	FLASH_LED_IRES7P5_MAX_CURR_MA, FLASH_LED_IRES5P0_MAX_CURR_MA
 };
-
+/* Added by zhaoqingsong@xiaomi.com */
+static struct flash_node_data *g_torch_0;
+static struct flash_node_data *g_torch_1;
+static struct flash_switch_data *g_switch_0;
+static struct flash_switch_data *g_switch_1;
+/* End of Added by qudao1@xiaomi.com */
 static inline int get_current_reg_code(int target_curr_ma, int ires_ua)
 {
 	if (!ires_ua || !target_curr_ma || (target_curr_ma < (ires_ua / 1000)))
@@ -628,6 +648,16 @@ static int qpnp_flash_led_init_settings(struct qpnp_flash_led *led)
 		return rc;
 
 	rc = qpnp_flash_led_thermal_config(led);
+	if (rc < 0)
+		return rc;
+
+	val = led->pdata->ramp_up_step << FLASH_LED_RAMP_UP_STEP_SHIFT;
+	val |= led->pdata->ramp_down_step;
+	rc = qpnp_flash_led_masked_write(led,
+			FLASH_LED_REG_RGLR_RAMP_RATE(led->base),
+			FLASH_LED_RAMP_UP_STEP_MASK |
+			FLASH_LED_RAMP_DOWN_STEP_MASK,
+			val);
 	if (rc < 0)
 		return rc;
 
@@ -1766,6 +1796,7 @@ static int qpnp_flash_led_regulator_control(struct led_classdev *led_cdev,
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(qpnp_flash_led_prepare);
 
 static int qpnp_flash_leds_prepare(struct led_trigger *trig, int options,
 					int *max_current)
@@ -1809,6 +1840,11 @@ static void qpnp_flash_led_brightness_set(struct led_classdev *led_cdev,
 						strlen("led:torch"))) {
 		fnode = container_of(led_cdev, struct flash_node_data, cdev);
 		led = dev_get_drvdata(&fnode->pdev->dev);
+    /* Added by zhaoqingsong@xiaomi.com */
+	} else if (!strncmp(led_cdev->name, "flashlight", strlen("flashlight"))) {
+		fnode = container_of(led_cdev, struct flash_node_data, cdev);
+		led = dev_get_drvdata(&fnode->pdev->dev);
+    /* End of Added by qudao1@xiaomi.com */
 	}
 
 	if (!led) {
@@ -1822,7 +1858,19 @@ static void qpnp_flash_led_brightness_set(struct led_classdev *led_cdev,
 		if (rc < 0)
 			pr_err("Failed to set flash LED switch rc=%d\n", rc);
 	} else if (fnode) {
-		qpnp_flash_led_node_set(fnode, value);
+	/* Added by zhaoqingsong@xiaomi.com */
+		if (!strncmp(led_cdev->name, "flashlight", strlen("flashlight"))) {
+			if (g_torch_0 && g_torch_1 && g_switch_0 && g_switch_1) {
+				pr_err("flash light fnode %d value %d", __LINE__, value);
+				qpnp_flash_led_node_set(g_torch_0, value);
+				qpnp_flash_led_node_set(g_torch_1, value);
+				qpnp_flash_led_switch_set(g_switch_0, value > 0);
+				qpnp_flash_led_switch_set(g_switch_1, value > 0);
+			}
+		} else {
+			qpnp_flash_led_node_set(fnode, value);
+		}
+	/* End of Added by qudao1@xiaomi.com */
 	}
 
 	spin_unlock(&led->lock);
@@ -2874,6 +2922,30 @@ static int qpnp_flash_led_parse_common_dt(struct qpnp_flash_led *led,
 		return rc;
 	}
 
+	val = FLASH_LED_RAMP_STEP_DEFAULT_NS;
+	rc = of_property_read_u32(node, "qcom,ramp-up-step", &val);
+	if (!rc && (val < FLASH_LED_RAMP_STEP_MIN_NS ||
+				val > FLASH_LED_RAMP_STEP_MAX_NS)) {
+		pr_err("Invalid ramp-up-step %d\n", val);
+		return -EINVAL;
+	} else if (rc && rc != -EINVAL) {
+		pr_err("Unable to read ramp-up-step, rc=%d\n", rc);
+		return rc;
+	}
+	led->pdata->ramp_up_step = ilog2(val / 100) - 1;
+
+	val = FLASH_LED_RAMP_STEP_DEFAULT_NS;
+	rc = of_property_read_u32(node, "qcom,ramp-down-step", &val);
+	if (!rc && (val < FLASH_LED_RAMP_STEP_MIN_NS ||
+				val > FLASH_LED_RAMP_STEP_MAX_NS)) {
+		pr_err("Invalid ramp-down-step %d\n", val);
+		return -EINVAL;
+	} else if (rc && rc != -EINVAL) {
+		pr_err("Unable to read ramp-down-step, rc=%d\n", rc);
+		return rc;
+	}
+	led->pdata->ramp_down_step = ilog2(val / 100) - 1;
+
 	rc = qpnp_flash_led_parse_battery_prop_dt(led, node);
 	if (rc < 0)
 		return rc;
@@ -2956,7 +3028,10 @@ static int qpnp_flash_led_probe(struct platform_device *pdev)
 	struct device_node *node, *temp;
 	const char *temp_string;
 	int rc, i = 0, j = 0;
-
+	/* Added by zhaoqingsong@xiaomi.com */
+	struct flash_node_data *fnode;
+	struct flash_switch_data *snode;
+	/* End of Added by qudao1@xiaomi.com */
 	node = pdev->dev.of_node;
 	if (!node) {
 		pr_err("No flash LED nodes defined\n");
@@ -3041,12 +3116,30 @@ static int qpnp_flash_led_probe(struct platform_device *pdev)
 					i, rc);
 				goto error_led_register;
 			}
+		#if 1
+			fnode = &led->fnode[i];
+			if (!strcmp("led:torch_0", fnode->cdev.name)) {
+				g_torch_0 = fnode;
+			} else if (!strcmp("led:torch_1",  fnode->cdev.name)) {
+				g_torch_1 = fnode;
+			}
+		#endif
 			i++;
 		}
 
 		if (!strcmp("switch", temp_string)) {
 			rc = qpnp_flash_led_parse_and_register_switch(led,
 					&led->snode[j], temp);
+	/* Added by zhaoqingsong@xiaomi.com */
+			#if 1
+			snode = &led->snode[j];
+			if (!strcmp("led:switch_0", snode->cdev.name)) {
+				g_switch_0 = snode;
+			} else if (!strcmp("led:switch_1", snode->cdev.name)) {
+				g_switch_1 = snode;
+			}
+			#endif
+	/* End of Added by qudao1@xiaomi.com */
 			if (rc < 0) {
 				pr_err("Unable to parse and register switch node, rc=%d\n",
 					rc);

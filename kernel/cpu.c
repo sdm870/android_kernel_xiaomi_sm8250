@@ -3,7 +3,6 @@
  *
  * This code is licenced under the GPL.
  */
-#include <linux/sched/mm.h>
 #include <linux/proc_fs.h>
 #include <linux/smp.h>
 #include <linux/init.h>
@@ -534,21 +533,6 @@ static int bringup_cpu(unsigned int cpu)
 	if (ret)
 		return ret;
 	return bringup_wait_for_ap(cpu);
-}
-
-static int finish_cpu(unsigned int cpu)
-{
-	struct task_struct *idle = idle_thread_get(cpu);
-	struct mm_struct *mm = idle->active_mm;
-
-	/*
-	 * idle_task_exit() will have switched to &init_mm, now
-	 * clean up any remaining active_mm state.
-	 */
-	if (mm != &init_mm)
-		idle->active_mm = &init_mm;
-	mmdrop(mm);
-	return 0;
 }
 
 /*
@@ -1478,7 +1462,7 @@ static struct cpuhp_step cpuhp_hp_states[] = {
 	[CPUHP_BRINGUP_CPU] = {
 		.name			= "cpu:bringup",
 		.startup.single		= bringup_cpu,
-		.teardown.single	= finish_cpu,
+		.teardown.single	= NULL,
 		.cant_stop		= true,
 	},
 	/* Final state before CPU kills itself */
@@ -2343,6 +2327,9 @@ EXPORT_SYMBOL(__cpu_active_mask);
 struct cpumask __cpu_isolated_mask __read_mostly;
 EXPORT_SYMBOL(__cpu_isolated_mask);
 
+unsigned int __cpu_psci_id[NR_CPUS];
+EXPORT_SYMBOL(__cpu_psci_id);
+
 void init_cpu_present(const struct cpumask *src)
 {
 	cpumask_copy(&__cpu_present_mask, src);
@@ -2379,6 +2366,7 @@ void __init boot_cpu_init(void)
 #ifdef CONFIG_SMP
 	__boot_cpu_id = cpu;
 #endif
+	set_cpu_psci_function_id(cpu, 0);
 }
 
 /*

@@ -113,6 +113,10 @@ struct schedtune {
 	/* Hint to bias scheduling of tasks on that SchedTune CGroup
 	 * towards idle CPUs */
 	int prefer_idle;
+
+	/* Hint to bias scheduling of tasks on that SchedTune CGroup
+	 * towards higher capacity CPUs */
+	bool prefer_high_cap;
 };
 
 static inline struct schedtune *css_st(struct cgroup_subsys_state *css)
@@ -149,6 +153,7 @@ root_schedtune = {
 	.colocate_update_disabled = false,
 #endif
 	.prefer_idle = 0,
+	.prefer_high_cap = false,
 };
 
 /*
@@ -162,7 +167,7 @@ root_schedtune = {
  *    implementation especially for the computation of the per-CPU boost
  *    value
  */
-#define BOOSTGROUPS_COUNT 6
+#define BOOSTGROUPS_COUNT 8
 
 /* Array of configured boostgroups */
 static struct schedtune *allocated_group[BOOSTGROUPS_COUNT] = {
@@ -206,6 +211,11 @@ static inline void init_sched_boost(struct schedtune *st)
 	st->sched_boost_enabled = true;
 	st->colocate = false;
 	st->colocate_update_disabled = false;
+}
+
+bool same_schedtune(struct task_struct *tsk1, struct task_struct *tsk2)
+{
+	return task_schedtune(tsk1) == task_schedtune(tsk2);
 }
 
 void update_cgroup_boost_settings(void)
@@ -466,23 +476,6 @@ static int sched_colocate_write(struct cgroup_subsys_state *css,
 	return 0;
 }
 
-bool schedtune_task_colocated(struct task_struct *p)
-{
-	struct schedtune *st;
-	bool colocated;
-
-	if (unlikely(!schedtune_initialized))
-		return false;
-
-	/* Get task boost value */
-	rcu_read_lock();
-	st = task_schedtune(p);
-	colocated = st->colocate;
-	rcu_read_unlock();
-
-	return colocated;
-}
-
 #else /* CONFIG_SCHED_WALT */
 
 static inline void init_sched_boost(struct schedtune *st) { }
@@ -571,6 +564,40 @@ int schedtune_prefer_idle(struct task_struct *p)
 	rcu_read_unlock();
 
 	return prefer_idle;
+}
+
+bool schedtune_prefer_high_cap(struct task_struct *p)
+{
+	struct schedtune *st;
+	int prefer_high_cap;
+
+	if (unlikely(!schedtune_initialized))
+		return false;
+
+	/* Get prefer_high_cap value */
+	rcu_read_lock();
+	st = task_schedtune(p);
+	prefer_high_cap = st->prefer_high_cap;
+	rcu_read_unlock();
+
+	return prefer_high_cap;
+}
+
+static u64 prefer_high_cap_read(struct cgroup_subsys_state *css,
+				struct cftype *cft)
+{
+	struct schedtune *st = css_st(css);
+
+	return st->prefer_high_cap;
+}
+
+static int prefer_high_cap_write(struct cgroup_subsys_state *css,
+				 struct cftype *cft, u64 prefer_high_cap)
+{
+	struct schedtune *st = css_st(css);
+	st->prefer_high_cap = !!prefer_high_cap;
+
+	return 0;
 }
 
 static u64
@@ -723,6 +750,11 @@ static struct cftype files[] = {
 		.name = "prefer_idle",
 		.read_u64 = prefer_idle_read,
 		.write_u64 = prefer_idle_write,
+	},
+	{
+		.name = "prefer_high_cap",
+		.read_u64 = prefer_high_cap_read,
+		.write_u64 = prefer_high_cap_write,
 	},
 	{ }	/* terminate */
 };

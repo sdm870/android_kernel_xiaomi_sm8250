@@ -176,6 +176,7 @@ config ARM64
 	select SYSCTL_EXCEPTION_TRACE
 	select THREAD_INFO_IN_TASK
 	select ARCH_SUPPORTS_SPECULATIVE_PAGE_FAULT
+	select USER_STACKTRACE_SUPPORT
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -1263,6 +1264,7 @@ config ARM64_PAN
 
 config ARM64_LSE_ATOMICS
 	bool "Atomic instructions"
+	default y
 	help
 	  As part of the Large System Extensions, ARMv8.1 introduces new
 	  atomic instructions that are designed specifically to scale in
@@ -1670,3 +1672,17 @@ source "arch/arm64/kvm/Kconfig"
 if CRYPTO
 source "arch/arm64/crypto/Kconfig"
 endif
+
+config FACTORY_BUILD
+	bool "distiguish factory version from dev version"
+	default n
+	help
+	  This macro will be defined when build factory version. It is used to
+	  distinguish factory and dev codes in kernel.
+
+config HWCONF_MANAGER
+	bool "Hardware configuration and monitor information"
+	default y
+	help
+         It provides all kinds of components configuration information and
+         monitor values.

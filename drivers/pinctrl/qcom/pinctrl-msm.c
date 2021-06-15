@@ -35,6 +35,8 @@
 #include <linux/log2.h>
 #include <linux/bitmap.h>
 
+#include <linux/pinctrl/pinctrl_mi.h>
+
 #include "../core.h"
 #include "../pinconf.h"
 #include "pinctrl-msm.h"
@@ -78,6 +80,9 @@ struct msm_pinctrl {
 
 	const struct msm_pinctrl_soc_data *soc;
 	void __iomem *regs;
+
+	u32 *ignored_gpios;
+	int ignored_gpios_nr;
 };
 
 static struct msm_pinctrl *msm_pinctrl_data;
@@ -487,6 +492,19 @@ static int msm_gpio_get(struct gpio_chip *chip, unsigned offset)
 	return !!(val & BIT(g->in_bit));
 }
 
+///xiaomi add
+void __iomem *msm_gpio_regadd_get(unsigned offset)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = gpiochip_get_data(&msm_pinctrl_data->chip);
+
+	g = &pctrl->soc->groups[offset];
+
+	return (pctrl->regs + g->io_reg);
+}
+EXPORT_SYMBOL(msm_gpio_regadd_get);
+///xiaomi add
+
 static void msm_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
 	const struct msm_pingroup *g;
@@ -566,17 +584,87 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	seq_puts(s, "\n");
 }
 
+
+static bool msm_gpio_is_ignored(struct gpio_chip *chip, unsigned int gpio)
+{
+	struct msm_pinctrl *pctrl = gpiochip_get_data(chip);
+	int i;
+	for (i = 0; i < pctrl->ignored_gpios_nr; i++) {
+		if (gpio == pctrl->ignored_gpios[i])
+			return true;
+	}
+	return false;
+}
+
 static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
 	unsigned gpio = chip->base;
 	unsigned i;
 
-	for (i = 0; i < chip->ngpio; i++, gpio++)
+	for (i = 0; i < chip->ngpio; i++, gpio++) {
+		if (msm_gpio_is_ignored(chip, i))
+			continue;
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
+	}
 }
+
+struct gpio_chip *g_chip;
+
+int msm_gpio_dump(struct seq_file *s)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = gpiochip_get_data(g_chip);
+	unsigned int func, i, len;
+	int is_out, drive, pull, io_value;
+	u32 ctl_reg, io_reg;
+	char *title_msg = "------------ MSM GPIO -------------";
+	char list_gpio[100];
+	const char *dir_state[3] = {" IN , ", " OUT, ", "----, "};
+	const char *val_state[3] = {" LOW, ", "HIGH, ", "----, "};
+	const char *pul_state[5] = {" NO , ", " PD , ", " KP , ", " PU , ",
+				    "----, "};
+
+	if (s)
+		seq_printf(s, "%s\n", title_msg);
+	else
+		pr_info("%s\n", title_msg);
+	for (i = 0; i < g_chip->ngpio; i++) {
+		if (msm_gpio_is_ignored(g_chip, i))
+			continue;
+		memset(list_gpio, 0, sizeof(list_gpio));
+		len = 0;
+		g = &pctrl->soc->groups[i];
+		ctl_reg = readl_relaxed(pctrl->regs + g->ctl_reg);
+		io_reg = readl_relaxed(pctrl->regs + g->io_reg);
+		is_out = !!(ctl_reg & BIT(g->oe_bit));
+		func = (ctl_reg >> g->mux_bit) & 7;
+		drive = (ctl_reg >> g->drv_bit) & 7;
+		pull = (ctl_reg >> g->pull_bit) & 3;
+		len += snprintf(list_gpio + len, sizeof(list_gpio) - len,
+				"GPIO[%3d]: [FS]0x%x ", i, func);
+		if (is_out)
+			io_value = (io_reg >> 1) & 0x1;
+		else
+			io_value = io_reg & 0x1;
+		len += snprintf(list_gpio + len, sizeof(list_gpio) - len,
+				"[DIR]%s[VAL]%5s[PULL]%s[DRV]%2dmA",
+				dir_state[is_out],
+				val_state[io_value],
+				pul_state[pull],
+				msm_regval_to_drive(drive));
+		list_gpio[99] = '\0';
+		if (s)
+			seq_printf(s, "%s\n", list_gpio);
+		else
+			pr_info("%s\n", list_gpio);
+	};
+	return 0;
+}
+EXPORT_SYMBOL_GPL(msm_gpio_dump);
 
 #else
 #define msm_gpio_dbg_show NULL
+#define msm_gpio_dump NULL
 #endif
 
 static const struct gpio_chip msm_gpio_template = {
@@ -1326,6 +1414,7 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 	int ret;
 	unsigned ngpio = pctrl->soc->ngpios;
 	struct device_node *dn;
+	int ignored_gpios_nr;
 
 	if (WARN_ON(ngpio > MAX_NR_GPIO))
 		return -EINVAL;
@@ -1374,6 +1463,21 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 		return ret;
 	}
 
+	ignored_gpios_nr = of_property_count_u32_elems(chip->of_node,
+		"goog,ignored-gpios");
+	if (ignored_gpios_nr > 0) {
+		pctrl->ignored_gpios = kmalloc_array(ignored_gpios_nr,
+			sizeof(*pctrl->ignored_gpios), GFP_KERNEL);
+		if (!pctrl->ignored_gpios) {
+			ret = -ENOMEM;
+			goto fail;
+		}
+		of_property_read_u32_array(chip->of_node, "goog,ignored-gpios",
+			pctrl->ignored_gpios,
+			ignored_gpios_nr);
+		pctrl->ignored_gpios_nr = ignored_gpios_nr;
+	}
+
 	ret = msm_gpio_init_valid_mask(chip, pctrl);
 	if (ret) {
 		dev_err(pctrl->dev, "Failed to setup irq valid bits\n");
@@ -1402,8 +1506,15 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 	gpiochip_set_chained_irqchip(chip, &pctrl->irq_chip, pctrl->irq,
 				     msm_gpio_irq_handler);
 
+#ifdef CONFIG_DEBUG_FS
+	g_chip = &pctrl->chip;
+	msm_gpio_dump_builtin_cb = msm_gpio_dump;
+#endif
+
 	return 0;
 fail:
+	kfree(pctrl->ignored_gpios);
+	pctrl->ignored_gpios = NULL;
 	gpiochip_remove(&pctrl->chip);
 	return ret;
 }
@@ -1583,7 +1694,8 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 	pctrl->irq = platform_get_irq(pdev, 0);
 	if (pctrl->irq < 0) {
 		dev_err(&pdev->dev, "No interrupt defined for msmgpio\n");
-		return pctrl->irq;
+		ret = pctrl->irq;
+		goto fail;
 	}
 
 	pctrl->desc.owner = THIS_MODULE;
@@ -1597,12 +1709,15 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 	pctrl->pctrl = devm_pinctrl_register(&pdev->dev, &pctrl->desc, pctrl);
 	if (IS_ERR(pctrl->pctrl)) {
 		dev_err(&pdev->dev, "Couldn't register pinctrl driver\n");
-		return PTR_ERR(pctrl->pctrl);
+		ret = PTR_ERR(pctrl->pctrl);
+		goto fail;
 	}
 
 	ret = msm_gpio_init(pctrl);
-	if (ret)
-		return ret;
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to init msm gpios\n");
+		goto fail;
+	}
 
 	num_irq = platform_irq_count(pdev);
 
@@ -1622,6 +1737,10 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 	dev_dbg(&pdev->dev, "Probed Qualcomm pinctrl driver\n");
 
 	return 0;
+
+fail:
+	unregister_restart_handler(&pctrl->restart_nb);
+	return ret;
 }
 EXPORT_SYMBOL(msm_pinctrl_probe);
 
@@ -1629,6 +1748,8 @@ int msm_pinctrl_remove(struct platform_device *pdev)
 {
 	struct msm_pinctrl *pctrl = platform_get_drvdata(pdev);
 
+	kfree(pctrl->ignored_gpios);
+	pctrl->ignored_gpios = NULL;
 	gpiochip_remove(&pctrl->chip);
 
 	unregister_restart_handler(&pctrl->restart_nb);
@@ -1637,4 +1758,7 @@ int msm_pinctrl_remove(struct platform_device *pdev)
 	return 0;
 }
 EXPORT_SYMBOL(msm_pinctrl_remove);
+
+MODULE_LICENSE("GPL v2");
+MODULE_DESCRIPTION("Qualcomm core pin ctrl driver");
 

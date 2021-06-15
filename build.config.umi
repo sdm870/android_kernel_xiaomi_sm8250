@@ -1,0 +1,5 @@
+BRANCH=android-msm-umi-4.19
+KERNEL_DIR=private/msm-google
+DEFCONFIG=umi_user_defconfig
+. ${ROOT_DIR}/${KERNEL_DIR}/build.config.gourami.common.clang
+POST_DEFCONFIG_CMDS="check_defconfig"

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2021 XiaoMi, Inc.
  */
 
 
@@ -21,7 +22,7 @@
 #include <linux/pinctrl/consumer.h>
 
 #define SPI_NUM_CHIPSELECT	(4)
-#define SPI_XFER_TIMEOUT_MS	(250)
+#define SPI_XFER_TIMEOUT_MS	(1500)
 #define SPI_AUTO_SUSPEND_DELAY	(250)
 /* SPI SE specific registers */
 #define SE_SPI_CPHA		(0x224)
@@ -1437,11 +1438,16 @@ static void geni_spi_handle_rx(struct spi_geni_master *mas)
 	int rx_wc = 0;
 	u8 *rx_buf = NULL;
 
-	if (!mas->cur_xfer)
+	rx_wc = (rx_fifo_status & RX_FIFO_WC_MSK);
+
+	/* Dummy read the fifo in case of unexpected rx fifo wm */
+	if (!mas->cur_xfer) {
+		for (i = 0; i < rx_wc; i++)
+			geni_read_reg(mas->base, SE_GENI_RX_FIFOn);
 		return;
+	}
 
 	rx_buf = mas->cur_xfer->rx_buf;
-	rx_wc = (rx_fifo_status & RX_FIFO_WC_MSK);
 	if (rx_fifo_status & RX_LAST) {
 		int rx_last_byte_valid =
 			(rx_fifo_status & RX_LAST_BYTE_VALID_MSK)
@@ -1488,6 +1494,7 @@ static irqreturn_t geni_spi_irq(int irq, void *data)
 		goto exit_geni_spi_irq;
 	}
 	m_irq = geni_read_reg(mas->base, SE_GENI_M_IRQ_STATUS);
+	GENI_SE_DBG(mas->ipc, false, mas->dev, "m_irq : 0x%x\n", m_irq);
 	if (mas->cur_xfer_mode == FIFO_MODE) {
 		if ((m_irq & M_RX_FIFO_WATERMARK_EN) ||
 						(m_irq & M_RX_FIFO_LAST_EN))

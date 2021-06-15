@@ -19,6 +19,7 @@
 
 #include "../core.h"
 #include "../pinctrl-utils.h"
+#include "../../gpio/gpiolib.h"
 
 #define PMIC_GPIO_ADDRESS_RANGE			0x100
 
@@ -174,6 +175,9 @@ struct pmic_gpio_state {
 	struct pinctrl_dev *ctrl;
 	struct gpio_chip chip;
 	const char **gpio_groups;
+#ifdef CONFIG_DEBUG_FS
+	struct list_head chip_list;
+#endif
 };
 
 static const struct pinconf_generic_params pmic_gpio_bindings[] = {
@@ -192,6 +196,9 @@ static const struct pin_config_item pmic_conf_items[ARRAY_SIZE(pmic_gpio_binding
 	PCONFDUMP(PMIC_GPIO_CONF_ANALOG_PASS, "analog-pass", NULL, true),
 	PCONFDUMP(PMIC_GPIO_CONF_DTEST_BUFFER, "dtest-buffer", NULL, true),
 };
+
+static LIST_HEAD(state_chips);
+static DEFINE_MUTEX(state_chips_lock);
 #endif
 
 static const char *const pmic_gpio_groups[] = {
@@ -626,6 +633,130 @@ static int pmic_gpio_config_set(struct pinctrl_dev *pctldev, unsigned int pin,
 
 	return ret;
 }
+
+#ifdef CONFIG_DEBUG_FS
+int pmic_gpio_dump(struct seq_file *s)
+{
+	struct pmic_gpio_state *state;
+	struct pinctrl_dev *pctldev;
+	struct pmic_gpio_pad *pad;
+	int ret, iv;
+	unsigned int i, len;
+	char read_buf[256];
+
+	static const char *const mode[] = {
+		"in", "out", "inout", "pass"
+	};
+
+	static const char *const biases[] = {
+		"PU 30uA", "PU 1.5uA", "PU 31.5uA",
+		"PU boost", "PD 10uA", "no pull"
+	};
+
+	static const char *const strengths[] = {
+		"no", "low", "medium", "high"
+	};
+
+	list_for_each_entry(state, &state_chips, chip_list) {
+		pctldev = state->ctrl;
+		if (s)
+			seq_printf(s, "---------- %s ----------\n",
+				   state->chip.label);
+		else {
+			pr_info("---------- %s ----------\n",
+				state->chip.label);
+		}
+
+		for (i = 0; i < state->chip.ngpio; i++) {
+			pad = pctldev->desc->pins[i].drv_data;
+			memset(read_buf, 0, sizeof(read_buf));
+			len = 0;
+
+			ret = pmic_gpio_read(state, pad,
+					     PMIC_GPIO_REG_EN_CTL);
+			if (ret < 0 || !(ret >>
+					PMIC_GPIO_REG_MASTER_EN_SHIFT)) {
+				if (s)
+					seq_printf(s, "GPIO[%2d]: ---\n",
+						pad->gpio_idx);
+				else
+					pr_info("GPIO[%2d]: ---\n",
+						pad->gpio_idx);
+			} else {
+				ret = pmic_gpio_read(state, pad,
+					PMIC_GPIO_REG_LV_MV_DIG_OUT_SOURCE_CTL);
+				if (ret < 0)
+					continue;
+				iv = ret >> PMIC_GPIO_LV_MV_OUTPUT_INVERT_SHIFT;
+				ret &= PMIC_GPIO_LV_MV_OUTPUT_SOURCE_SEL_MASK;
+				len += snprintf(read_buf + len,
+						sizeof(read_buf) - len,
+						"[FS]%7s ",
+						pmic_gpio_functions[ret]);
+
+				ret = pmic_gpio_read(state, pad,
+						PMIC_GPIO_REG_MODE_CTL);
+				if (ret < 0)
+					continue;
+				len += snprintf(read_buf + len,
+						sizeof(read_buf) - len,
+						"[DIR]%6s ", mode[ret]);
+
+				if (ret == 1)
+					ret = iv;
+				else {
+					ret = pmic_gpio_read(state, pad,
+							PMIC_MPP_REG_RT_STS);
+					if (ret < 0)
+						continue;
+				}
+				len += snprintf(read_buf + len,
+						sizeof(read_buf) - len,
+						"[VAL]%5s ",
+						ret ? "high" : "low");
+
+				ret = pmic_gpio_read(state, pad,
+						PMIC_GPIO_REG_DIG_PULL_CTL);
+				if (ret < 0)
+					continue;
+				len += snprintf(read_buf + len,
+						sizeof(read_buf) - len,
+						"[pull] %-10s",
+						biases[ret]);
+
+				ret = pmic_gpio_read(state, pad,
+						PMIC_GPIO_REG_DIG_VIN_CTL);
+				if (ret < 0)
+					continue;
+				len += snprintf(read_buf + len,
+						sizeof(read_buf) - len,
+						"[vin_sel]%2d ", ret);
+
+				ret = pmic_gpio_read(state, pad,
+						PMIC_GPIO_REG_DIG_OUT_CTL);
+				if (ret < 0)
+					continue;
+				ret = ret >> PMIC_GPIO_REG_OUT_STRENGTH_SHIFT;
+				ret &= PMIC_GPIO_REG_OUT_TYPE_MASK;
+				len += snprintf(read_buf + len,
+						sizeof(read_buf) - len,
+						"[out_strength] %-7s",
+						strengths[ret]);
+
+				read_buf[255] = '\0';
+				if (s)
+					seq_printf(s, "GPIO[%2d]: %s\n",
+						pad->gpio_idx, read_buf);
+				else
+					pr_info("GPIO[%2d]: %s\n",
+						pad->gpio_idx, read_buf);
+			}
+		}
+	}
+	return 0;
+}
+EXPORT_SYMBOL_GPL(pmic_gpio_dump);
+#endif
 
 static void pmic_gpio_config_dbg_show(struct pinctrl_dev *pctldev,
 				      struct seq_file *s, unsigned pin)
@@ -1172,6 +1303,12 @@ static int pmic_gpio_probe(struct platform_device *pdev)
 		}
 	}
 
+#ifdef CONFIG_DEBUG_FS
+	mutex_lock(&state_chips_lock);
+	list_add(&state->chip_list, &state_chips);
+	mutex_unlock(&state_chips_lock);
+#endif
+
 err_free:
 	kfree(disallowed);
 
@@ -1207,7 +1344,23 @@ static struct platform_driver pmic_gpio_driver = {
 	.remove = pmic_gpio_remove,
 };
 
-module_platform_driver(pmic_gpio_driver);
+static int __init pinctrl_spmi_gpio_init(void)
+{
+#ifdef CONFIG_DEBUG_FS
+	pmic_gpio_dump_builtin_cb = pmic_gpio_dump;
+#endif
+	return platform_driver_register(&pmic_gpio_driver);
+}
+module_init(pinctrl_spmi_gpio_init);
+
+static void __exit pinctrl_spmi_gpio_exit(void)
+{
+#ifdef CONFIG_DEBUG_FS
+	pmic_gpio_dump_builtin_cb = NULL;
+#endif
+	platform_driver_unregister(&pmic_gpio_driver);
+}
+module_exit(pinctrl_spmi_gpio_exit);
 
 MODULE_AUTHOR("Ivan T. Ivanov <iivanov@mm-sol.com>");
 MODULE_DESCRIPTION("Qualcomm SPMI PMIC GPIO pin control driver");

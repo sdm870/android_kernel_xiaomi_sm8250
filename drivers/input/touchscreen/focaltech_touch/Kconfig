@@ -3,10 +3,20 @@
 #
 
 config TOUCHSCREEN_FTS
-	bool "Focaltech Touchscreen"
+	tristate "Focaltech Touchscreen"
+	depends on I2C
+	default n
 	help
-	  Say Y here if you have Focaltech touch panel.
-	  If unsure, say N.
+		Say Y here if you have Focaltech touch panel.
+		If unsure, say N.
+
+config TOUCHSCREEN_FTS_FOD
+    tristate "Touch Support New Game Mode"
+    default n
+    help
+      Say Y here if the device support new game mode
+
+      If not support, say N.
 
 config TOUCHSCREEN_FTS_DIRECTORY
 	string "Focaltech ts directory name"

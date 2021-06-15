@@ -23,6 +23,7 @@
 #include <linux/cfi.h>
 #include <linux/tracepoint-defs.h>
 #include <linux/cfi.h>
+#include <linux/srcu.h>
 #include <linux/android_kabi.h>
 
 #include <linux/percpu.h>

@@ -3,6 +3,7 @@
  * kernel userspace event delivery
  *
  * Copyright (C) 2004 Red Hat, Inc.  All rights reserved.
+ * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (C) 2004 Novell, Inc.  All rights reserved.
  * Copyright (C) 2004 IBM, Inc. All rights reserved.
  *

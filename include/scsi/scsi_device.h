@@ -202,7 +202,6 @@ struct scsi_device {
 	unsigned unmap_limit_for_ws:1;	/* Use the UNMAP limit for WRITE SAME */
 	unsigned use_rpm_auto:1; /* Enable runtime PM auto suspend */
 
-#define SCSI_DEFAULT_AUTOSUSPEND_DELAY  -1
 	int autosuspend_delay;
 	unsigned rpm_autosuspend:1;	/* Enable runtime autosuspend at device
 					 * creation time */

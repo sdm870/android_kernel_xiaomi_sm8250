@@ -1280,6 +1280,8 @@ void register_tick_sched_wakeup_callback(void (*cb)(void))
 }
 EXPORT_SYMBOL_GPL(register_tick_sched_wakeup_callback);
 
+static void (*wake_callback)(void);
+
 /*
  * We rearm the timer until we get disabled by the idle code.
  * Called with interrupts disabled.
@@ -1301,6 +1303,12 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 		tick_sched_handle(ts, regs);
 		if (rq_info.init == 1 && wake_callback &&
 				tick_do_timer_cpu == smp_processor_id()) {
+			/*
+			 * wakeup user if needed
+			 */
+			wake_callback();
+		}
+		if (wake_callback && tick_do_timer_cpu == smp_processor_id()) {
 			/*
 			 * wakeup user if needed
 			 */

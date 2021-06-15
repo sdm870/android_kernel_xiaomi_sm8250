@@ -236,10 +236,12 @@ static struct kgsl_mem_entry *kgsl_mem_entry_create(void)
 		atomic_set(&entry->map_count, 0);
 	}
 
+	atomic_set(&entry->map_count, 0);
 	return entry;
 }
 
-static void add_dmabuf_list(struct kgsl_dma_buf_meta *meta)
+static void add_dmabuf_list(struct kgsl_device *device,
+				struct kgsl_dma_buf_meta *meta)
 {
 	struct dmabuf_list_entry *dle;
 	struct page *page;
@@ -272,11 +274,14 @@ static void add_dmabuf_list(struct kgsl_dma_buf_meta *meta)
 		list_add(&dle->node, &kgsl_dmabuf_list);
 		meta->dle = dle;
 		list_add(&meta->node, &dle->dmabuf_list);
+		kgsl_trace_gpu_mem_total(device,
+				 meta->entry->memdesc.size);
 	}
 	spin_unlock(&kgsl_dmabuf_lock);
 }
 
-static void remove_dmabuf_list(struct kgsl_dma_buf_meta *meta)
+static void remove_dmabuf_list(struct kgsl_device *device,
+				struct kgsl_dma_buf_meta *meta)
 {
 	struct dmabuf_list_entry *dle = meta->dle;
 
@@ -288,15 +293,18 @@ static void remove_dmabuf_list(struct kgsl_dma_buf_meta *meta)
 	if (list_empty(&dle->dmabuf_list)) {
 		list_del(&dle->node);
 		kfree(dle);
+		kgsl_trace_gpu_mem_total(device,
+				-(meta->entry->memdesc.size));
 	}
 	spin_unlock(&kgsl_dmabuf_lock);
 }
 
 #ifdef CONFIG_DMA_SHARED_BUFFER
-static void kgsl_destroy_ion(struct kgsl_dma_buf_meta *meta)
+static void kgsl_destroy_ion(struct kgsl_device *device,
+				struct kgsl_dma_buf_meta *meta)
 {
 	if (meta != NULL) {
-		remove_dmabuf_list(meta);
+		remove_dmabuf_list(device, meta);
 		dma_buf_unmap_attachment(meta->attach, meta->table,
 			DMA_BIDIRECTIONAL);
 		dma_buf_detach(meta->dmabuf, meta->attach);
@@ -305,14 +313,16 @@ static void kgsl_destroy_ion(struct kgsl_dma_buf_meta *meta)
 	}
 }
 #else
-static void kgsl_destroy_ion(struct kgsl_dma_buf_meta *meta)
+static void kgsl_destroy_ion(struct kgsl_device *device,
+				struct kgsl_dma_buf_meta *meta)
 {
-
 }
 #endif
 
 static void mem_entry_destroy(struct kgsl_mem_entry *entry)
 {
+	struct kgsl_device *device =
+				KGSL_MMU_DEVICE(entry->memdesc.pagetable->mmu);
 	unsigned int memtype;
 
 	/* pull out the memtype before the flags get cleared */
@@ -354,15 +364,15 @@ static void mem_entry_destroy(struct kgsl_mem_entry *entry)
 		}
 	}
 
-	kgsl_sharedmem_free(&entry->memdesc);
-
 	switch (memtype) {
 	case KGSL_MEM_ENTRY_ION:
-		kgsl_destroy_ion(entry->priv_data);
+		kgsl_destroy_ion(device, entry->priv_data);
 		break;
 	default:
 		break;
 	}
+
+	kgsl_sharedmem_free(&entry->memdesc);
 
 	kfree(entry);
 }
@@ -559,6 +569,21 @@ static int _kgsl_get_context_id(struct kgsl_device *device)
 	return id;
 }
 
+void kgsl_dump_active_contexts(struct kgsl_device *device)
+{
+	struct kgsl_context *tmp_context;
+	int tmp_id;
+
+	read_lock(&device->context_lock);
+	idr_for_each_entry (&device->context_idr, tmp_context, tmp_id) {
+		dev_warn(device->dev, "process %s pid %d created %d contexts",
+				tmp_context->proc_priv->comm,
+				tmp_context->proc_priv->pid,
+				tmp_context->proc_priv->ctxt_count);
+	}
+	read_unlock(&device->context_lock);
+}
+
 /**
  * kgsl_context_init() - helper to initialize kgsl_context members
  * @dev_priv: the owner of the context
@@ -608,10 +633,12 @@ int kgsl_context_init(struct kgsl_device_private *dev_priv,
 	}
 
 	if (id < 0) {
-		if (id == -ENOSPC)
+		if (id == -ENOSPC) {
 			dev_warn(device->dev,
-				      "cannot have more than %zu contexts due to memstore limitation\n",
-				      KGSL_MEMSTORE_MAX);
+					"cannot have more than %zu contexts due to memstore limitation\n",
+					KGSL_MEMSTORE_MAX);
+			kgsl_dump_active_contexts(device);
+		}
 		atomic_dec(&proc_priv->ctxt_count);
 		return id;
 	}
@@ -2835,7 +2862,7 @@ long kgsl_ioctl_gpuobj_import(struct kgsl_device_private *dev_priv,
 
 unmap:
 	if (kgsl_memdesc_usermem_type(&entry->memdesc) == KGSL_MEM_ENTRY_ION) {
-		kgsl_destroy_ion(entry->priv_data);
+		kgsl_destroy_ion(dev_priv->device, entry->priv_data);
 		entry->memdesc.sgt = NULL;
 	}
 
@@ -2980,7 +3007,7 @@ static int kgsl_setup_dma_buf(struct kgsl_device *device,
 		goto out;
 	}
 
-	add_dmabuf_list(meta);
+	add_dmabuf_list(device, meta);
 	entry->memdesc.size = PAGE_ALIGN(entry->memdesc.size);
 
 out:
@@ -3150,7 +3177,7 @@ long kgsl_ioctl_map_user_mem(struct kgsl_device_private *dev_priv,
 error_attach:
 	switch (kgsl_memdesc_usermem_type(&entry->memdesc)) {
 	case KGSL_MEM_ENTRY_ION:
-		kgsl_destroy_ion(entry->priv_data);
+		kgsl_destroy_ion(dev_priv->device, entry->priv_data);
 		entry->memdesc.sgt = NULL;
 		break;
 	default:

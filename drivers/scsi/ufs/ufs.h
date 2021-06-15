@@ -37,6 +37,7 @@
 #define _UFS_H
 
 #include <linux/mutex.h>
+#include <linux/ktime.h>
 #include <linux/types.h>
 #include <scsi/ufs/ufs.h>
 
@@ -260,6 +261,8 @@ enum geometry_desc_param {
 	GEOMETRY_DESC_PARAM_WB_SUP_WB_TYPE	= 0x56,
 };
 
+#define UFSHCD_DEFAULT_PE_CYCLE		3000
+
 /* Health descriptor parameters offsets in bytes*/
 enum health_desc_param {
 	HEALTH_DESC_PARAM_LEN			= 0x0,
@@ -267,6 +270,8 @@ enum health_desc_param {
 	HEALTH_DESC_PARAM_EOL_INFO		= 0x2,
 	HEALTH_DESC_PARAM_LIFE_TIME_EST_A	= 0x3,
 	HEALTH_DESC_PARAM_LIFE_TIME_EST_B	= 0x4,
+	HEALTH_DESC_PARAM_LIFE_TIME_EST_C	= 0x24,
+	HEALTH_DESC_PARAM_ERASE_OFFSET		= 0x0D,
 };
 
 /*
@@ -625,6 +630,12 @@ struct ufs_dev_info {
 	bool keep_vcc_on;
 
 	bool wb_config_lun;
+
+	unsigned int eol_info;
+	unsigned int life_time_estimation_a;
+	unsigned int life_time_estimation_b;
+	unsigned int life_time_estimation_c;
+	ktime_t health_cached_t;
 };
 
 #define MAX_MODEL_LEN 16

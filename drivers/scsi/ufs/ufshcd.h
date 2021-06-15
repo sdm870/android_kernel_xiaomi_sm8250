@@ -3,6 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.h
  * Copyright (C) 2011-2013 Samsung India Software Operations
+ * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  *
  * Authors:
@@ -70,7 +71,6 @@
 #include <scsi/scsi_tcq.h>
 #include <scsi/scsi_dbg.h>
 #include <scsi/scsi_eh.h>
-#include <linux/android_kabi.h>
 
 #include <linux/fault-inject.h>
 
@@ -90,6 +90,29 @@ enum dev_cmd_type {
 	DEV_CMD_TYPE_QUERY		= 0x1,
 };
 
+#define ufs_spin_lock_irqsave(lock, flags)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_lock_irqsave(lock, flags);	\
+} while (0)
+
+#define ufs_spin_unlock_irqrestore(lock, flags)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_unlock_irqrestore(lock, flags);	\
+} while (0)
+
+#define ufs_spin_lock(lock)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_lock(lock);	\
+} while (0)
+
+#define ufs_spin_unlock(lock)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_unlock(lock);	\
+} while (0)
 /**
  * struct uic_command - UIC command structure
  * @command: UIC command
@@ -382,11 +405,6 @@ struct ufs_hba_variant_ops {
 #endif
 	int	(*program_key)(struct ufs_hba *hba,
 			       const union ufs_crypto_cfg_entry *cfg, int slot);
-
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-	ANDROID_KABI_RESERVE(3);
-	ANDROID_KABI_RESERVE(4);
 };
 
 /**
@@ -430,11 +448,24 @@ struct ufs_hba_crypto_variant_ops {
 				    struct scsi_cmnd *cmd,
 				    struct ufshcd_lrb *lrbp);
 	void *priv;
+};
 
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-	ANDROID_KABI_RESERVE(3);
-	ANDROID_KABI_RESERVE(4);
+/* for manual gc */
+enum {
+	MANUAL_GC_OFF = 0,
+	MANUAL_GC_ON,
+	MANUAL_GC_DISABLE,
+	MANUAL_GC_ENABLE,
+	MANUAL_GC_MAX,
+};
+
+struct ufs_manual_gc {
+	int state;
+	bool hagc_support;
+	struct hrtimer hrtimer;
+	unsigned long delay_ms;
+	struct work_struct hibern8_work;
+	struct workqueue_struct *mgc_workq;
 };
 
 /* clock gating state  */
@@ -480,7 +511,6 @@ struct ufs_clk_gating {
 	struct device_attribute delay_perf_attr;
 	struct device_attribute enable_attr;
 	bool is_enabled;
-	bool gate_wk_in_process;
 	int active_reqs;
 	struct workqueue_struct *clk_gating_workq;
 };
@@ -591,6 +621,7 @@ struct debugfs_files {
 	struct dentry *dbg_print_en;
 	struct dentry *req_stats;
 	struct dentry *query_stats;
+	struct dentry *io_stats;
 	u32 dme_local_attr_id;
 	u32 dme_peer_attr_id;
 	struct dentry *reset_controller;
@@ -603,6 +634,7 @@ struct debugfs_files {
 	struct fault_attr fail_attr;
 #endif
 };
+#endif
 
 /* tag stats statistics types */
 enum ts_types {
@@ -613,7 +645,15 @@ enum ts_types {
 	TS_URGENT_READ		= 3,
 	TS_URGENT_WRITE		= 4,
 	TS_FLUSH		= 5,
-	TS_NUM_STATS		= 6,
+	TS_DISCARD		= 6,
+	TS_NUM_STATS		= 7,
+};
+
+enum req_show_types {
+	SHOW_IO_MIN	= 0,
+	SHOW_IO_MAX	= 1,
+	SHOW_IO_AVG	= 2,
+	SHOW_IO_SUM	= 3,
 };
 
 /**
@@ -629,7 +669,24 @@ struct ufshcd_req_stat {
 	u64 sum;
 	u64 count;
 };
-#endif
+
+/**
+ * struct ufshcd_io_stat - statistics for I/O amount.
+ * @req_count_started: total number of I/O requests, which were started.
+ * @total_bytes_started: total I/O amount in bytes, which were started.
+ * @req_count_completed: total number of I/O request, which were completed.
+ * @total_bytes_completed: total I/O amount in bytes, which were completed.
+ * @max_diff_req_count: MAX of 'req_count_started - req_count_completed'.
+ * @max_diff_total_bytes: MAX of 'total_bytes_started - total_bytes_completed'.
+ */
+struct ufshcd_io_stat {
+	u64 req_count_started;
+	u64 total_bytes_started;
+	u64 req_count_completed;
+	u64 total_bytes_completed;
+	u64 max_diff_req_count;
+	u64 max_diff_total_bytes;
+};
 
 enum ufshcd_ctx {
 	QUEUE_CMD,
@@ -682,15 +739,18 @@ struct ufshcd_blk_ctx {
  * @dme_err: tracks dme errors
  */
 struct ufs_stats {
-#ifdef CONFIG_DEBUG_FS
 	bool enabled;
 	u64 **tag_stats;
 	int q_depth;
 	int err_stats[UFS_ERR_MAX];
 	struct ufshcd_req_stat req_stats[TS_NUM_STATS];
+	u64 peak_reqs[TS_NUM_STATS];
+	u64 peak_queue_depth;
 	int query_stats_arr[UPIU_QUERY_OPCODE_MAX][MAX_QUERY_IDN];
+	struct ufshcd_io_stat io_read;
+	struct ufshcd_io_stat io_write;
+	struct ufshcd_io_stat io_readwrite;
 
-#endif
 	u32 last_intr_status;
 	ktime_t last_intr_ts;
 	struct ufshcd_clk_ctx clk_hold;
@@ -710,6 +770,41 @@ struct ufs_stats {
 	u32 dl_err_cnt[UFS_EC_DL_MAX];
 	u32 dme_err_cnt;
 };
+
+static inline bool is_read_opcode(u8 opcode)
+{
+	return opcode == READ_10 || opcode == READ_16;
+}
+
+static inline bool is_write_opcode(u8 opcode)
+{
+	return opcode == WRITE_10 || opcode == WRITE_16;
+}
+
+static inline bool is_unmap_opcode(u8 opcode)
+{
+	return opcode == UNMAP;
+}
+
+static inline char *parse_opcode(u8 opcode)
+{
+	/* string should be less than 12 byte-long */
+	switch (opcode) {
+	case READ_10:
+		return "READ_10";
+	case READ_16:
+		return "READ_16";
+	case WRITE_10:
+		return "WRITE_10";
+	case WRITE_16:
+		return "WRITE_16";
+	case UNMAP:
+		return "UNMAP";
+	case SYNCHRONIZE_CACHE:
+		return "SYNC_CACHE";
+	}
+	return NULL;
+}
 
 /* UFS Host Controller debug print bitmask */
 #define UFSHCD_DBG_PRINT_CLK_FREQ_EN		UFS_BIT(0)
@@ -733,7 +828,7 @@ struct ufshcd_cmd_log_entry {
 	u8 lun;
 	u8 cmd_id;
 	sector_t lba;
-	int transfer_len;
+	u32 transfer_len;
 	u8 idn;		/* used only for query idn */
 	u32 doorbell;
 	u32 outstanding_reqs;
@@ -746,6 +841,29 @@ struct ufshcd_cmd_log {
 	struct ufshcd_cmd_log_entry *entries;
 	int pos;
 	u32 seq_num;
+};
+
+/* UFS card state - hotplug state */
+enum ufshcd_card_state {
+	UFS_CARD_STATE_UNKNOWN	= 0,
+	UFS_CARD_STATE_ONLINE	= 1,
+	UFS_CARD_STATE_OFFLINE	= 2,
+};
+
+/* UFS Slow I/O operation types */
+enum ufshcd_slowio_optype {
+	UFSHCD_SLOWIO_READ = 0,
+	UFSHCD_SLOWIO_WRITE = 1,
+	UFSHCD_SLOWIO_UNMAP = 2,
+	UFSHCD_SLOWIO_SYNC = 3,
+	UFSHCD_SLOWIO_OP_MAX = 4,
+};
+
+/* UFS Slow I/O sysfs entry types */
+enum ufshcd_slowio_systype {
+	UFSHCD_SLOWIO_US = 0,
+	UFSHCD_SLOWIO_CNT = 1,
+	UFSHCD_SLOWIO_SYS_MAX = 2,
 };
 
 /**
@@ -1098,6 +1216,7 @@ struct ufs_hba {
 
 	/* sync b/w diff contexts */
 	struct rw_semaphore lock;
+	struct rw_semaphore query_lock;
 	unsigned long shutdown_in_prog;
 
 	/* If set, don't gate device ref_clk during clock gating */
@@ -1115,6 +1234,10 @@ struct ufs_hba {
 	bool phy_init_g4;
 	bool force_g4;
 	bool wb_enabled;
+	struct ufs_manual_gc manual_gc;
+	/* To monitor slow UFS I/O requests. */
+	u64 slowio_min_us;
+	u64 slowio[UFSHCD_SLOWIO_OP_MAX][UFSHCD_SLOWIO_SYS_MAX];
 
 #ifdef CONFIG_SCSI_UFS_CRYPTO
 	/* crypto */
@@ -1123,11 +1246,6 @@ struct ufs_hba {
 	u32 crypto_cfg_register;
 	struct keyslot_manager *ksm;
 #endif /* CONFIG_SCSI_UFS_CRYPTO */
-
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-	ANDROID_KABI_RESERVE(3);
-	ANDROID_KABI_RESERVE(4);
 };
 
 static inline void ufshcd_mark_shutdown_ongoing(struct ufs_hba *hba)
@@ -1367,14 +1485,15 @@ static inline bool ufshcd_is_embedded_dev(struct ufs_hba *hba)
 	return false;
 }
 
-#ifdef CONFIG_DEBUG_FS
+extern u64 ufshcd_prev_sum[TS_NUM_STATS];
+extern u64 ufshcd_prev_count[TS_NUM_STATS];
+
 static inline void ufshcd_init_req_stats(struct ufs_hba *hba)
 {
 	memset(hba->ufs_stats.req_stats, 0, sizeof(hba->ufs_stats.req_stats));
+	memset(ufshcd_prev_sum, 0, sizeof(ufshcd_prev_sum));
+	memset(ufshcd_prev_count, 0, sizeof(ufshcd_prev_count));
 }
-#else
-static inline void ufshcd_init_req_stats(struct ufs_hba *hba) {}
-#endif
 
 /* Expose Query-Request API */
 int ufshcd_query_descriptor_retry(struct ufs_hba *hba,
@@ -1390,10 +1509,16 @@ int ufshcd_read_desc_param(struct ufs_hba *hba,
 			   u8 param_size);
 int ufshcd_query_attr(struct ufs_hba *hba, enum query_opcode opcode,
 		      enum attr_idn idn, u8 index, u8 selector, u32 *attr_val);
+int ufshcd_query_attr_retry(struct ufs_hba *hba,
+	enum query_opcode opcode, enum attr_idn idn, u8 index, u8 selector,
+	u32 *attr_val);
+int ufshcd_query_flag_retry(struct ufs_hba *hba,
+	enum query_opcode opcode, enum flag_idn idn, bool *flag_res);
 int ufshcd_query_flag(struct ufs_hba *hba, enum query_opcode opcode,
 	enum flag_idn idn, bool *flag_res);
 int ufshcd_read_string_desc(struct ufs_hba *hba, int desc_index,
 			    u8 *buf, u32 size, bool ascii);
+int ufshcd_update_health(struct ufs_hba *hba);
 
 int ufshcd_hold(struct ufs_hba *hba, bool async);
 void ufshcd_release(struct ufs_hba *hba, bool no_sched);
@@ -1402,6 +1527,7 @@ int ufshcd_change_power_mode(struct ufs_hba *hba,
 			     struct ufs_pa_layer_attr *pwr_mode);
 void ufshcd_abort_outstanding_transfer_requests(struct ufs_hba *hba,
 		int result);
+int ufshcd_bkops_ctrl(struct ufs_hba *hba, enum bkops_status status);
 
 int ufshcd_map_desc_id_to_length(struct ufs_hba *hba, enum desc_idn desc_id,
 	int *desc_length);
@@ -1583,7 +1709,7 @@ static inline void ufshcd_vops_remove_debugfs(struct ufs_hba *hba)
 }
 #else
 static inline void ufshcd_vops_add_debugfs(struct ufs_hba *hba,
-					   struct dentry *root)
+						struct dentry *root)
 {
 }
 
@@ -1633,4 +1759,12 @@ static inline unsigned int ufshcd_vops_get_user_cap_mode(struct ufs_hba *hba)
 		return hba->var->vops->get_user_cap_mode(hba);
 	return 0;
 }
+
+void ufshcd_update_slowio_min_us(struct ufs_hba *hba);
+
+#define UFSHCD_MIN_SLOWIO_US		(1000)     /*  1 ms      */
+#define UFSHCD_DEFAULT_SLOWIO_READ_US	(5000000)  /*  5 seconds */
+#define UFSHCD_DEFAULT_SLOWIO_WRITE_US	(10000000) /* 10 seconds */
+#define UFSHCD_DEFAULT_SLOWIO_UNMAP_US	(30000000) /* 30 seconds */
+#define UFSHCD_DEFAULT_SLOWIO_SYNC_US	(10000000) /* 10 seconds */
 #endif /* End of Header */

@@ -10,6 +10,7 @@ obj-$(CONFIG_CRYPTO_WORKQUEUE) += crypto_wq.o
 
 obj-$(CONFIG_CRYPTO_ENGINE) += crypto_engine.o
 obj-$(CONFIG_CRYPTO_FIPS) += fips.o
+obj-$(CONFIG_CRYPTO_NIAP_FPT_TST_EXT_11) += niap.o
 
 crypto_algapi-$(CONFIG_PROC_FS) += proc.o
 crypto_algapi-y := algapi.o scatterwalk.o $(crypto_algapi-y)
@@ -161,3 +162,15 @@ obj-$(CONFIG_ASYMMETRIC_KEY_TYPE) += asymmetric_keys/
 obj-$(CONFIG_CRYPTO_HASH_INFO) += hash_info.o
 crypto_simd-y := simd.o
 obj-$(CONFIG_CRYPTO_SIMD) += crypto_simd.o
+
+ifeq ($(cc-name),gcc)
+	ifneq ($(filter -mcpu=%, $(MACH_CFLAGS)),)
+# Includes crypto extension by default for Clang
+ccflags-y += $(filter -mcpu=%, $(MACH_CFLAGS))+crypto
+	endif
+endif
+
+ifneq ($(filter -Wa$(comma)-mcpu=%, $(MACH_AFLAGS)),)
+ccflags-y += $(filter -Wa$(comma)-mcpu=%, $(MACH_AFLAGS))+crypto
+asflags-y += $(filter -Wa$(comma)-mcpu=%, $(MACH_AFLAGS))+crypto
+endif

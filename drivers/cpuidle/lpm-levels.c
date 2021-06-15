@@ -43,6 +43,7 @@
 #include "../clk/clk.h"
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
+#include <linux/gpio.h>
 
 #define SCLK_HZ (32768)
 #define PSCI_POWER_STATE(reset) (reset << 30)
@@ -1381,6 +1382,13 @@ static bool psci_enter_sleep(struct lpm_cpu *cpu, int idx, bool from_idle)
 			0xdeaffeed, 0xdeaffeed, from_idle);
 	stop_critical_timings();
 
+#ifdef CONFIG_DEBUG_FS
+	if (!from_idle && pm_gpio_debug_mask) {
+		msm_gpio_dump(NULL);
+		pmic_gpio_dump(NULL);
+	}
+#endif
+
 	success = !arm_cpuidle_suspend(state_id);
 
 	start_critical_timings();
@@ -1720,7 +1728,6 @@ static void lpm_suspend_wake(void)
 	suspend_in_progress = false;
 	lpm_stats_suspend_exit();
 }
-
 static int lpm_suspend_enter(suspend_state_t state)
 {
 	int cpu = raw_smp_processor_id();
