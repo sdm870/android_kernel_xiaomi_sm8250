@@ -52,8 +52,6 @@ ssize_t dsi_display_fod_get(struct drm_connector *connector, char *buf);
 
 ssize_t complete_commit_time_get(struct drm_connector *connector, char *buf);
 
-int dsi_display_set_thermal_hbm_disabled(struct drm_connector *connector,
-				bool thermal_hbm_disabled);
 int dsi_display_get_thermal_hbm_disabled(struct drm_connector *connector,
 				bool *thermal_hbm_disabled);
 

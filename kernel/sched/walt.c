@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
- * Copyright (C) 2021 XiaoMi, Inc.
  */
 
 #include <linux/syscore_ops.h>
@@ -425,27 +424,22 @@ void sched_account_irqtime(int cpu, struct task_struct *curr,
 				 u64 delta, u64 wallclock)
 {
 	struct rq *rq = cpu_rq(cpu);
-	unsigned long nr_windows;
+	unsigned long flags, nr_windows;
 	u64 cur_jiffies_ts;
 
+	raw_spin_lock_irqsave(&rq->lock, flags);
+
 	/*
-	 * We called with interrupts disabled. Take the rq lock only
-	 * if we are in idle context in which case update_task_ravg()
-	 * call is needed.
+	 * cputime (wallclock) uses sched_clock so use the same here for
+	 * consistency.
 	 */
-	if (is_idle_task(curr)) {
-		raw_spin_lock(&rq->lock);
-		/*
-		 * cputime (wallclock) uses sched_clock so use the same here
-		 * for consistency.
-		 */
-		delta += sched_clock() - wallclock;
+	delta += sched_clock() - wallclock;
+	cur_jiffies_ts = get_jiffies_64();
+
+	if (is_idle_task(curr))
 		update_task_ravg(curr, rq, IRQ_UPDATE, sched_ktime_clock(),
 				 delta);
-		raw_spin_unlock(&rq->lock);
-	}
 
-	cur_jiffies_ts = get_jiffies_64();
 	nr_windows = cur_jiffies_ts - rq->irqload_ts;
 
 	if (nr_windows) {
@@ -463,6 +457,7 @@ void sched_account_irqtime(int cpu, struct task_struct *curr,
 
 	rq->cur_irqload += delta;
 	rq->irqload_ts = cur_jiffies_ts;
+	raw_spin_unlock_irqrestore(&rq->lock, flags);
 }
 
 /*
@@ -633,7 +628,7 @@ cpu_util_freq_walt(int cpu, struct sched_walt_cpu_load *walt_load)
 static inline void account_load_subtractions(struct rq *rq)
 {
 	u64 ws = rq->window_start;
-	u64 prev_ws = ws - rq->prev_window_size;
+	u64 prev_ws = ws - sched_ravg_window;
 	struct load_subtractions *ls = rq->load_subs;
 	int i;
 
@@ -708,7 +703,7 @@ void update_cluster_load_subtractions(struct task_struct *p,
 {
 	struct sched_cluster *cluster = cpu_cluster(cpu);
 	struct cpumask cluster_cpus = cluster->cpus;
-	u64 prev_ws = ws - cpu_rq(cpu)->prev_window_size;
+	u64 prev_ws = ws - sched_ravg_window;
 	int i;
 
 	cpumask_clear_cpu(cpu, &cluster_cpus);
@@ -1031,7 +1026,7 @@ unsigned int max_possible_efficiency = 1;
 unsigned int min_possible_efficiency = UINT_MAX;
 
 unsigned int sysctl_sched_conservative_pl;
-unsigned int sysctl_sched_many_wakeup_threshold = WALT_MANY_WAKEUP_DEFAULT;
+unsigned int sysctl_sched_many_wakeup_threshold = 1000;
 
 #define INC_STEP 8
 #define DEC_STEP 2
@@ -2071,10 +2066,8 @@ static inline void run_walt_irq_work(u64 old_window_start, struct rq *rq)
 
 	result = atomic64_cmpxchg(&walt_irq_work_lastq_ws, old_window_start,
 				   rq->window_start);
-	if (result == old_window_start) {
+	if (result == old_window_start)
 		walt_irq_work_queue(&walt_cpufreq_irq_work);
-		trace_walt_window_rollover(rq->window_start);
-	}
 }
 
 /* Reflect task activity on its demand and cpu's busy time statistics */
@@ -2647,6 +2640,7 @@ int register_cpu_cycle_counter_cb(struct cpu_cycle_counter_cb *cb)
 				    CPUFREQ_TRANSITION_NOTIFIER);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(register_cpu_cycle_counter_cb);
 
 static void transfer_busy_time(struct rq *rq, struct related_thread_group *grp,
 				struct task_struct *p, int event);
@@ -3143,6 +3137,7 @@ void sched_update_cpu_freq_min_max(const cpumask_t *cpus, u32 fmin, u32 fmax)
 	if (update_capacity)
 		walt_cpus_capacity_changed(cpus);
 }
+EXPORT_SYMBOL_GPL(sched_update_cpu_freq_min_max);
 
 void note_task_waking(struct task_struct *p, u64 wallclock)
 {
@@ -3459,19 +3454,11 @@ void walt_irq_work(struct irq_work *irq_work)
 	/*
 	 * If the window change request is in pending, good place to
 	 * change sched_ravg_window since all rq locks are acquired.
-	 *
-	 * If the current window roll over is delayed such that the
-	 * mark_start (current wallclock with which roll over is done)
-	 * of the current task went past the window start with the
-	 * updated new window size, delay the update to the next
-	 * window roll over. Otherwise the CPU counters (prs and crs) are
-	 * not rolled over properly as mark_start > window_start.
 	 */
 	if (!is_migration) {
 		spin_lock_irqsave(&sched_ravg_window_lock, flags);
 
-		if ((sched_ravg_window != new_sched_ravg_window) &&
-		    (wc < this_rq()->window_start + new_sched_ravg_window)) {
+		if (sched_ravg_window != new_sched_ravg_window) {
 			sched_ravg_window_change_time = sched_ktime_clock();
 			printk_deferred("ALERT: changing window size from %u to %u at %lu\n",
 					sched_ravg_window,

@@ -393,34 +393,9 @@ static ssize_t thermal_hbm_disabled_store(struct device *device,
 			   struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
-	struct drm_connector *connector = to_drm_connector(device);
-	char *input_copy, *input_dup = NULL;
-	bool thermal_hbm_disabled;
-	int ret;
+	ssize_t ret = count;
 
-	input_copy = kstrdup(buf, GFP_KERNEL);
-	if (!input_copy) {
-		DRM_ERROR("can not allocate memory\n");
-		ret = -ENOMEM;
-		goto exit;
-	}
-	input_dup = input_copy;
-	/* removes leading and trailing whitespace from input_copy */
-	input_copy = strim(input_copy);
-	ret = kstrtobool(input_copy, &thermal_hbm_disabled);
-	if (ret) {
-		DRM_ERROR("input buffer conversion failed\n");
-		ret = -EAGAIN;
-		goto exit_free;
-	}
-
-	DRM_INFO("set thermal_hbm_disabled %d\n", thermal_hbm_disabled);
-	ret = dsi_display_set_thermal_hbm_disabled(connector, thermal_hbm_disabled);
-
-exit_free:
-	kfree(input_dup);
-exit:
-	return ret ? ret : count;
+	return ret;
 }
 
 static ssize_t thermal_hbm_disabled_show(struct device *device,

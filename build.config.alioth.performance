@@ -50,6 +50,9 @@ function update_perf_config() {
     -d L2TP_DEBUGFS \
     -d REGMAP_ALLOW_WRITE_DEBUGFS \
     -d CORESIGHT \
+    -m CORESIGHT_PLACEHOLDER \
+    -m CORESIGHT_AMBA_PLACEHOLDER \
+    -e PID_IN_CONTEXTIDR \
     -d PAGE_POISONING \
     -d QCOM_RTB \
     -d BLK_DEV_IO_TRACE \
