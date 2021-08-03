@@ -1,5 +1,4 @@
 /* Copyright (c) 2015, The Linux Foundation. All rights reserved.
-* Copyright (C) 2021 XiaoMi, Inc.
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License version 2 and
 * only version 2 as published by the Free Software Foundation.
@@ -83,6 +82,7 @@ static struct crus_control_t this_ctrl = {
 	.copp_rev = 6, // V3 as default
 	.afe_ena = false,
 	.copp_ena = true,
+	.copp_idx = 0,
 };
 
 
@@ -455,7 +455,7 @@ static int crus_get_param(int port_id, int module_id, int param_id,
 		switch(this_ctrl.copp_rev) {
 			case 5:
 			case 6:
-				crus_adm_get_params(port_id, 0, module_id,
+				crus_adm_get_params(port_id, this_ctrl.copp_idx, module_id,
 						param_id, data_ptr, length, 0);
 				break;
 			default:
@@ -485,7 +485,7 @@ static int crus_set_param(int port_id, int module_id, int param_id,
 		switch(this_ctrl.copp_rev) {
 			case 5:
 			case 6:
-				crus_adm_set_params(port_id, 0, module_id,
+				crus_adm_set_params(port_id, this_ctrl.copp_idx, module_id,
 						param_id, data_ptr, length);
 				break;
 			default:
@@ -1130,6 +1130,17 @@ static const struct snd_kcontrol_new crus_no_protect_controls[] = {
 	SOC_ENUM_EXT("Cirrus SP Volume Attenuation", crus_vol_attn_enum[0],
 	msm_routing_crus_vol_attn_get, msm_routing_crus_vol_attn_put),
 };
+
+void msm_crus_pb_set_copp_idx(int port_id, int copp_idx)
+{
+	if (port_id != this_ctrl.ff_port)
+		return;
+
+	pr_info("%s: port_id = 0x%x, copp_idx = %d\n", __func__, port_id, copp_idx);
+
+	this_ctrl.copp_idx = copp_idx;
+}
+EXPORT_SYMBOL(msm_crus_pb_set_copp_idx);
 
 void msm_crus_pb_add_controls(struct snd_soc_component *component)
 {

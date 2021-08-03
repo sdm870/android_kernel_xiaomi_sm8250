@@ -2,7 +2,6 @@
  * linux/sound/cs35l41.h -- Platform data for CS35L41
  *
  * Copyright (c) 2018 Cirrus Logic Inc.
- * Copyright (C) 2021 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -36,6 +35,7 @@ struct cs35l41_platform_data {
 	bool right_channel;
 	bool amp_gain_zc;
 	bool ng_enable;
+	bool invert_pcm;
 	int bst_ind;
 	int bst_vctrl;
 	int bst_ipk;
@@ -49,6 +49,25 @@ struct cs35l41_platform_data {
 	struct classh_cfg classh_config;
 	int mnSpkType;
 	struct device_node *spk_id_gpio_p;
+};
+
+struct cs35l41_vol_ctl {
+	struct workqueue_struct *ramp_wq;
+	struct work_struct ramp_work;
+	struct mutex vol_mutex; /* Protect set volume */
+	atomic_t manual_ramp; /* boolean */
+	atomic_t ramp_abort; /* boolean */
+	atomic_t vol_ramp; /* boolean */
+	atomic_t playback; /* boolean */
+	int ramp_init_att;
+	int ramp_knee_att;
+	unsigned int ramp_knee_time;
+	unsigned int ramp_end_time;
+	int dig_vol;
+	unsigned int auto_ramp_timeout;
+	unsigned int output_dev;
+	unsigned int prev_active_dev;
+	ktime_t dev_timestamp;
 };
 
 struct cs35l41_private {
@@ -79,6 +98,7 @@ struct cs35l41_private {
 	struct soc_enum fast_switch_enum;
 	const char **fast_switch_names;
 	struct mutex rate_lock;
+	struct cs35l41_vol_ctl vol_ctl;
 	int dc_current_cnt;
 };
 

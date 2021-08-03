@@ -65,6 +65,7 @@ struct mhi_dev {
 	dma_addr_t iova_start;
 	dma_addr_t iova_stop;
 	enum mhi_suspend_mode suspend_mode;
+	struct work_struct fatal_worker;
 
 	/* hardware info */
 	u32 serial_num;
@@ -119,10 +120,6 @@ static inline int mhi_arch_link_lpm_disable(struct mhi_controller *mhi_cntrl)
 static inline int mhi_arch_link_lpm_enable(struct mhi_controller *mhi_cntrl)
 {
 	return 0;
-}
-
-static inline void mhi_arch_mission_mode_enter(struct mhi_controller *mhi_cntrl)
-{
 }
 
 #endif

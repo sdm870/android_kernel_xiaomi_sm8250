@@ -136,6 +136,7 @@ enum {
 
 #define POWER_PATH_STATUS_REG			(DCDC_BASE + 0x0B)
 #define USBIN_SUSPEND_STS_BIT			BIT(6)
+#define DCIN_SUSPEND_STS_BIT			BIT(5)
 #define USE_USBIN_BIT				BIT(4)
 #define USE_DCIN_BIT				BIT(3)
 #define POWER_PATH_MASK				GENMASK(2, 1)
@@ -143,6 +144,7 @@ enum {
 
 #define DCDC_CMD_OTG_REG			(DCDC_BASE + 0x40)
 #define OTG_EN_BIT				BIT(0)
+#define FAST_ROLE_SWAP_CMD			BIT(1)
 
 #define DCDC_FSW_SEL_REG			(DCDC_BASE + 0x50)
 
@@ -156,6 +158,8 @@ enum {
 #define USBIN_COLLAPSE_FAULT_EN_BIT		BIT(4)
 
 #define DCDC_CFG_REF_MAX_PSNS_REG		(DCDC_BASE + 0x8C)
+
+#define SCHG_P_DCDC_VBOOST_CFG			(DCDC_BASE + 0x86)
 
 #define DCDC_ENG_SDCDC_CFG5_REG			(DCDC_BASE + 0xC4)
 #define ENG_SDCDC_BAT_HPWR_MASK			GENMASK(7, 6)

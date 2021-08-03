@@ -1143,38 +1143,6 @@ static int32_t nvt_parse_dt(struct device *dev)
 }
 #endif
 
-static int nvt_get_panel_type(struct nvt_ts_data *ts_data)
-{
-	int i;
-	u8 *lockdown = ts_data->lockdown_info;
-	struct nvt_config_info *panel_list = ts->config_array;
-
-	for (i = 0; i < ts->config_array_size; i++) {
-
-		if (lockdown[0] == panel_list[i].tp_vendor) {
-			if(lockdown[0] == 0x46) {
-				break;
-			}
-			if (lockdown[7] == panel_list[i].glass_vendor) {
-				break;
-			}
-		}
-	}
-
-	ts->panel_index = i;
-
-	if (i >= ts->config_array_size) {
-		NVT_ERR("mismatch panel type, use default fw");
-		ts->panel_index = -EINVAL;
-		return ts->panel_index;
-	}
-
-	NVT_LOG("match panle type, fw is [%s], mp is [%s]",
-		panel_list[i].nvt_fw_name, panel_list[i].nvt_mp_name);
-
-	return ts->panel_index;
-}
-
 bool is_lockdown_empty(u8 *lockdown)
 {
 	bool ret = true;
@@ -1192,15 +1160,8 @@ bool is_lockdown_empty(u8 *lockdown)
 void nvt_match_fw(void)
 {
 	NVT_LOG("start match fw name");
-	if (is_lockdown_empty(ts->lockdown_info))
-		flush_work(&ts->nvt_lockdown_work);
-	if (nvt_get_panel_type(ts) < 0) {
-		ts->fw_name = DEFAULT_BOOT_UPDATE_FIRMWARE_NAME;
-		ts->mp_name = DEFAULT_MP_UPDATE_FIRMWARE_NAME;
-	} else {
-		ts->fw_name = ts->config_array[ts->panel_index].nvt_fw_name;
-		ts->mp_name = ts->config_array[ts->panel_index].nvt_mp_name;
-	}
+	ts->fw_name = DEFAULT_BOOT_UPDATE_FIRMWARE_NAME;
+	ts->mp_name = DEFAULT_MP_UPDATE_FIRMWARE_NAME;
 }
 
 /*******************************************************

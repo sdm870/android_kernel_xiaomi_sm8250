@@ -214,9 +214,6 @@ struct bio {
 
 	ktime_t bi_alloc_ts;			/* for mm_event */
 
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-
 	/*
 	 * We can inline a number of vecs at the end of the bio, to avoid
 	 * double allocations for a small number of bio_vecs. This member

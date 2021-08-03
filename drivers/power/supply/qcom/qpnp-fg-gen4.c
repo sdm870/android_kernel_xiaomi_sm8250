@@ -220,6 +220,7 @@ struct fg_dt_props {
 	bool	esr_calib_dischg;
 	bool	soc_hi_res;
 	bool	sun_profile_only;
+	bool	k11a_batt_profile;
 	bool	j3s_batt_profile;
 	bool	soc_scale_mode;
 	bool	fg_increase_100soc_time;
@@ -2117,6 +2118,9 @@ static int fg_gen4_get_batt_profile(struct fg_dev *fg)
 			} else if ((chip->ds_page0[0] == 'N') || (chip->ds_page0[0] == 'A')) {
 				profile_node = of_batterydata_get_best_profile(batt_node,
 					fg->batt_id_ohms / 1000, "j2nvtbm4n_4780mah");
+			} else if ((chip->ds_page0[0] == 'U') || (chip->ds_page0[0] == 'G')) {
+				profile_node = of_batterydata_get_best_profile(batt_node,
+					fg->batt_id_ohms / 1000, "K11A_FMT_4520mah");
 			} else if ((chip->ds_page0[0] == 'S') || (chip->ds_page0[0] == 'X')) {
 				if (chip->dt.j3s_batt_profile)
 					profile_node = of_batterydata_get_best_profile(batt_node,
@@ -2148,6 +2152,10 @@ static int fg_gen4_get_batt_profile(struct fg_dev *fg)
 					pr_warn("verifty battery fail. use default profile j3ssun_5000mah\n");
 					profile_node = of_batterydata_get_best_profile(batt_node,
 						fg->batt_id_ohms / 1000, "j3ssun_5000mah");
+				} else if (chip->dt.k11a_batt_profile) {
+					pr_warn("verifty battery fail. use default profile K11A_GY_4520mah\n");
+					profile_node = of_batterydata_get_best_profile(batt_node,
+						fg->batt_id_ohms / 1000, "K11A_GY_4520mah");
 				} else {
 					pr_warn("verifty battery fail. use default profile j11sun_4700mah\n");
 					profile_node = of_batterydata_get_best_profile(batt_node,
@@ -6969,6 +6977,7 @@ static int fg_gen4_parse_dt(struct fg_gen4_chip *chip)
 					"qcom,multi-profile-load");
 	chip->dt.soc_hi_res = of_property_read_bool(node, "qcom,soc-hi-res");
 	chip->dt.sun_profile_only = of_property_read_bool(node, "qcom,sun-profile-only");
+	chip->dt.k11a_batt_profile = of_property_read_bool(node, "qcom,k11a-batt-profile");
 	chip->dt.j3s_batt_profile = of_property_read_bool(node, "qcom,j3s-batt-profile");
 
 	chip->dt.fg_increase_100soc_time = of_property_read_bool(node, "qcom,fg-increase-100soc-time");

@@ -330,6 +330,8 @@ static int spss_create_sysfs(struct device *dev)
 		goto remove_test_fuse_state;
 	}
 
+	goto out;
+
 	ret = device_create_file(dev, &dev_attr_cmac_buf);
 	if (ret < 0) {
 		pr_err("failed to create sysfs file for cmac_buf.\n");
@@ -360,7 +362,7 @@ static int spss_create_sysfs(struct device *dev)
 		goto remove_pbl_cmac;
 	}
 
-
+out:
 	return 0;
 
 remove_pbl_cmac:
@@ -520,6 +522,8 @@ static long spss_utils_ioctl(struct file *file,
 
 	switch (cmd) {
 	case SPSS_IOC_SET_FW_CMAC:
+		return -EINVAL;
+
 		if (size != sizeof(fw_and_apps_cmacs)) {
 			pr_err("cmd [0x%x] invalid size [0x%x]\n", cmd, size);
 			return -EINVAL;
@@ -826,6 +830,8 @@ static int spss_parse_dt(struct device_node *node)
 	}
 	iounmap(spss_emul_type_reg);
 
+	goto out;
+
 	/* PIL-SPSS area */
 	np = of_parse_phandle(node, "pil-mem", 0);
 	if (!np) {
@@ -922,6 +928,7 @@ static int spss_parse_dt(struct device_node *node)
 
 	pr_debug("iar_state [%d]\n", iar_state);
 
+out:
 	return 0;
 }
 
@@ -1113,6 +1120,7 @@ static int spss_utils_pil_callback(struct notifier_block *nb,
 		pr_debug("[SUBSYS_PROXY_UNVOTE] event.\n");
 		break;
 	case SUBSYS_BEFORE_AUTH_AND_RESET:
+		break;
 		/* do nothing if IAR is not active */
 		if (!is_iar_active)
 			return NOTIFY_OK;

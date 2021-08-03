@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
-ccflags-y += -Wno-pointer-to-int-cast
 ccflags-y += -I$(srctree)/techpack/video/msm/vidc/ \
     -I$(srctree)/drivers/devfreq/
 

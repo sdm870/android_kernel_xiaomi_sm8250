@@ -152,6 +152,13 @@ static struct smb_params smb5_pm8150b_params = {
 		.max_u	= 3000000,
 		.step_u	= 500000,
 	},
+	.otg_out = {
+		.name   = "usb otg output voltage",
+		.reg    = SCHG_P_DCDC_VBOOST_CFG,
+		.min_u  = 4800000,
+		.max_u  = 5500000,
+		.step_u = 100000,
+	},
 	.dc_icl		= {
 		.name   = "DC input current limit",
 		.reg    = DCDC_CFG_REF_MAX_PSNS_REG,
@@ -223,6 +230,7 @@ struct smb_dt_props {
 	int			term_current_thresh_hi_ma;
 	int			term_current_thresh_lo_ma;
 	int			disable_suspend_on_collapse;
+	int			wdog_snarl_disable;
 };
 
 struct smb5 {
@@ -1169,6 +1177,14 @@ static int smb5_parse_dt_misc(struct smb5 *chip, struct device_node *node)
 	if (chg->chg_param.qc4_max_icl_ua <= 0)
 		chg->chg_param.qc4_max_icl_ua = MICRO_4PA;
 
+	chip->dt.wdog_snarl_disable = of_property_read_bool(node,
+					"google,wdog_snarl_disable");
+
+	rc = of_property_read_string(node, "google,usb-port-tz-name",
+				     &chg->usb_port_tz_name);
+	if (rc < 0)
+		pr_err("cannot read usb-port-tz-name, rc=%d\n", rc);
+
 	return 0;
 }
 
@@ -1286,6 +1302,8 @@ static int smb5_parse_dt_voltages(struct smb5 *chip, struct device_node *node)
 				"qcom,non-fcc-fv-max-uv", &chip->dt.non_fcc_batt_profile_fv_uv);
 	if (rc < 0)
 		chip->dt.non_fcc_batt_profile_fv_uv = -EINVAL;
+
+	of_property_read_u32(node, "google,otg-out-uv", &chg->otg_out_uv);
 
 	rc = of_property_read_u32(node, "qcom,chg-inhibit-threshold-mv",
 				&chip->dt.chg_inhibit_thr_mv);
@@ -1417,6 +1435,7 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_PD_CURRENT_MAX,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
+	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TYPE,
 	POWER_SUPPLY_PROP_TYPEC_MODE,
 	POWER_SUPPLY_PROP_TYPEC_POWER_ROLE,
@@ -1460,6 +1479,7 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_APDO_MAX,
 	POWER_SUPPLY_PROP_CHARGER_STATUS,
 	POWER_SUPPLY_PROP_INPUT_VOLTAGE_SETTLED,
+	POWER_SUPPLY_PROP_OTG_FASTROLESWAP,
 };
 
 static int smb5_usb_get_prop(struct power_supply *psy,
@@ -1501,7 +1521,10 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 		val->intval = get_client_vote(chg->usb_icl_votable, PD_VOTER);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
-		rc = smblib_get_prop_input_current_max(chg, val);
+		rc = smblib_get_charge_current(chg, &val->intval);
+		break;
+	case POWER_SUPPLY_PROP_TEMP:
+		rc = smblib_get_prop_usb_port_temp(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_TYPE:
 		val->intval = POWER_SUPPLY_TYPE_USB_PD;
@@ -1616,9 +1639,6 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_SMB_EN_REASON:
 		val->intval = chg->cp_reason;
 		break;
-	case POWER_SUPPLY_PROP_MOISTURE_DETECTED:
-		val->intval = chg->moisture_present;
-		break;
 	case POWER_SUPPLY_PROP_HVDCP_OPTI_ALLOWED:
 		val->intval = !chg->flash_active;
 		break;
@@ -1648,6 +1668,14 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_SKIN_HEALTH:
 		val->intval = smblib_get_skin_temp_status(chg);
 		break;
+	case POWER_SUPPLY_PROP_MOISTURE_DETECTED:
+		if (chg->uusb_moisture_protection_enabled)
+			val->intval = chg->moisture_present;
+		else
+			val->intval = (chg->lpd_reason == LPD_MOISTURE_DETECTED
+				       && chg->lpd_stage == LPD_STAGE_COMMIT) ? 1 :
+				       0;
+		break;
 	case POWER_SUPPLY_PROP_APSD_RERUN:
 		val->intval = 0;
 		break;
@@ -1674,6 +1702,9 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 			if (!rc)
 				val->intval = (buff[1] << 8 | buff[0]) * 1038;
 		}
+		break;
+	case POWER_SUPPLY_PROP_OTG_FASTROLESWAP:
+		rc = smblib_get_prop_otg_fastroleswap(chg, val);
 		break;
 	default:
 		pr_debug("get prop %d is not supported in usb\n", psp);
@@ -1806,6 +1837,9 @@ static int smb5_usb_set_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_APDO_MAX:
 		chg->apdo_max = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_OTG_FASTROLESWAP:
+		rc = smblib_set_prop_otg_fastroleswap(chg, val);
 		break;
 	default:
 		pr_debug("set prop %d is not supported\n", psp);
@@ -3353,6 +3387,16 @@ static int smb5_init_vbus_regulator(struct smb5 *chip)
 	if (!chg->vbus_vreg)
 		return -ENOMEM;
 
+	if (chg->otg_out_uv != 0) {
+		rc = smblib_set_charge_param(chg, &chg->param.otg_out,
+					     chg->otg_out_uv);
+		if (rc < 0) {
+			pr_err("Couldn't set otg output voltage rc=%d\n", rc);
+
+			return rc;
+		}
+	}
+
 	cfg.dev = chg->dev;
 	cfg.driver_data = chip;
 
@@ -4698,6 +4742,11 @@ static int smb5_request_interrupts(struct smb5 *chip)
 			&& (chg->early_usb_attach || chg->early_dc_attach)) {
 		enable_irq_wake(chg->irq_info[BAT_TEMP_IRQ].irq);
 		chg->batt_temp_irq_enabled = true;
+	}
+
+	if (chg->irq_info[WDOG_SNARL_IRQ].irq && chip->dt.wdog_snarl_disable) {
+		disable_irq_wake(chg->irq_info[WDOG_SNARL_IRQ].irq);
+		disable_irq_nosync(chg->irq_info[WDOG_SNARL_IRQ].irq);
 	}
 
 	vote(chg->limited_irq_disable_votable, CHARGER_TYPE_VOTER, true, 0);

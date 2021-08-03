@@ -675,7 +675,7 @@ static void mhi_pm_disable_transition(struct mhi_controller *mhi_cntrl,
 				  sfr_info->dma_addr);
 		sfr_info->buf_addr = NULL;
 	}
-	
+
 	mhi_cntrl->force_m3_done = false;
 
 	mutex_lock(&mhi_cntrl->pm_mutex);
@@ -1040,6 +1040,7 @@ error_setup_irq:
 		mhi_deinit_dev_ctxt(mhi_cntrl);
 
 error_dev_ctxt:
+	mhi_cntrl->pm_state = MHI_PM_DISABLE;
 	mutex_unlock(&mhi_cntrl->pm_mutex);
 
 	return ret;
@@ -1060,7 +1061,7 @@ void mhi_control_error(struct mhi_controller *mhi_cntrl)
 	if (sfr_info && sfr_info->buf_addr) {
 		memcpy(sfr_info->str, sfr_info->buf_addr, sfr_info->len);
 		MHI_CNTRL_ERR("mhi:%s sfr: %s\n", mhi_cntrl->name,
-				sfr_info->buf_addr);
+				sfr_info->str);
 	}
 
 	/* link is not down if device is in RDDM */
@@ -1100,9 +1101,15 @@ void mhi_power_down(struct mhi_controller *mhi_cntrl, bool graceful)
 	enum MHI_PM_STATE transition_state = MHI_PM_SHUTDOWN_PROCESS;
 
 	mutex_lock(&mhi_cntrl->pm_mutex);
-
 	write_lock_irq(&mhi_cntrl->pm_lock);
 	mhi_cntrl->power_down = true;
+	cur_state = mhi_cntrl->pm_state;
+	if (cur_state == MHI_PM_DISABLE) {
+		write_unlock_irq(&mhi_cntrl->pm_lock);
+		mutex_unlock(&mhi_cntrl->pm_mutex);
+		return; /* Already powered down */
+	}
+
 	/* if it's not graceful shutdown, force MHI to a linkdown state */
 	if (!graceful) {
 		cur_state = mhi_tryset_pm_state(mhi_cntrl,
@@ -1410,6 +1417,9 @@ int mhi_pm_resume(struct mhi_controller *mhi_cntrl)
 
 	if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state))
 		return -EIO;
+
+	if (mhi_get_mhi_state(mhi_cntrl) != MHI_STATE_M3)
+		return -EINVAL;
 
 	MHI_ASSERT(mhi_cntrl->pm_state != MHI_PM_M3, "mhi_pm_state != M3");
 

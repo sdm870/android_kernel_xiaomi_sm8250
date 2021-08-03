@@ -1,5 +1,4 @@
 /* Copyright (c) 2015 Cirrus Logic, Inc.
- * Copyright (C) 2021 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -12,7 +11,6 @@
  */
 #ifndef MSM_CIRRUS_PLAYBACK_H
 #define MSM_CIRRUS_PLAYBACK_H
-#define DEBUG
 #include <linux/slab.h>
 #include <sound/soc.h>
 #include <dsp/apr_audio-v2.h>
@@ -165,6 +163,7 @@ struct crus_control_t {
 	int32_t fb_port_index;
 	int32_t fb_port;
 	int32_t ff_port;
+	int32_t copp_idx;
 	int ch_sw_duration;
 	int32_t ch_sw;
 	int32_t vol_atten;

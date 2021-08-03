@@ -103,6 +103,19 @@ struct scan_control {
 	/* One of the zones is ready for compaction */
 	unsigned int compaction_ready:1;
 
+	/*
+	 * The clean file pages on the current node won't be reclaimed when
+	 * their amount is below vm.clean_low_kbytes *unless* we threaten
+	 * to OOM or have no free swap space or vm.swappiness=0.
+	 */
+	unsigned int clean_below_low:1;
+
+	/*
+	 * The clean file pages on the current node won't be reclaimed when
+	 * their amount is below vm.clean_min_kbytes.
+	 */
+	unsigned int clean_below_min:1;
+
 	/* Allocation order */
 	s8 order;
 
@@ -165,6 +178,17 @@ struct scan_control {
 #else
 #define prefetchw_prev_lru_page(_page, _base, _field) do { } while (0)
 #endif
+
+#if CONFIG_CLEAN_LOW_KBYTES < 0
+#error "CONFIG_CLEAN_LOW_KBYTES must be >= 0"
+#endif
+
+#if CONFIG_CLEAN_MIN_KBYTES < 0
+#error "CONFIG_CLEAN_MIN_KBYTES must be >= 0"
+#endif
+
+unsigned long sysctl_clean_low_kbytes __read_mostly = CONFIG_CLEAN_LOW_KBYTES;
+unsigned long sysctl_clean_min_kbytes __read_mostly = CONFIG_CLEAN_MIN_KBYTES;
 
 /*
  * From 0 .. 100.  Higher means more swappy.
@@ -2367,6 +2391,34 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 	unsigned long ap, fp;
 	enum lru_list lru;
 
+	/*
+	 * Check the number of clean file pages to protect them from
+	 * reclaiming if their amount is below the specified.
+	 */
+	if (sysctl_clean_low_kbytes || sysctl_clean_min_kbytes) {
+		unsigned long reclaimable_file, dirty, clean;
+
+		reclaimable_file =
+			node_page_state(pgdat, NR_ACTIVE_FILE) +
+			node_page_state(pgdat, NR_INACTIVE_FILE) +
+			node_page_state(pgdat, NR_ISOLATED_FILE);
+		dirty = node_page_state(pgdat, NR_FILE_DIRTY);
+		/*
+		 * node_page_state() sum can go out of sync since
+		 * all the values are not read at once.
+		 */
+		if (likely(reclaimable_file > dirty))
+			clean = (reclaimable_file - dirty) << (PAGE_SHIFT - 10);
+		else
+			clean = 0;
+
+		sc->clean_below_low = clean < sysctl_clean_low_kbytes;
+		sc->clean_below_min = clean < sysctl_clean_min_kbytes;
+	} else {
+		sc->clean_below_low = false;
+		sc->clean_below_min = false;
+	}
+
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || mem_cgroup_get_nr_swap_pages(memcg) <= 0) {
 		scan_balance = SCAN_FILE;
@@ -2435,6 +2487,16 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 				goto out;
 			}
 		}
+	}
+
+	/*
+	 * Force-scan anon if clean file pages is under vm.clean_min_kbytes
+	 * or vm.clean_low_kbytes (unless the swappiness setting
+	 * disagrees with swapping).
+	 */
+	if ((sc->clean_below_low || sc->clean_below_min) && swappiness) {
+		scan_balance = SCAN_ANON;
+		goto out;
 	}
 
 	/*
@@ -2550,6 +2612,13 @@ out:
 			/* Look ma, no brain */
 			BUG();
 		}
+
+		/*
+		 * Don't reclaim clean file pages when their amount is below
+		 * vm.clean_min_kbytes.
+		 */
+		if (file && sc->clean_below_min)
+			scan = 0;
 
 		*lru_pages += size;
 		nr[lru] = scan;
@@ -3304,6 +3373,7 @@ out:
 unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 				gfp_t gfp_mask, nodemask_t *nodemask)
 {
+	ktime_t event_ts;
 	unsigned long nr_reclaimed;
 	struct scan_control sc = {
 		.nr_to_reclaim = SWAP_CLUSTER_MAX,
@@ -3334,6 +3404,7 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	if (throttle_direct_reclaim(sc.gfp_mask, zonelist, nodemask))
 		return 1;
 
+	mm_event_start(&event_ts);
 	trace_mm_vmscan_direct_reclaim_begin(order,
 				sc.may_writepage,
 				sc.gfp_mask,
@@ -3342,6 +3413,7 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
 
 	trace_mm_vmscan_direct_reclaim_end(nr_reclaimed);
+	mm_event_end(MM_RECLAIM, event_ts);
 
 	return nr_reclaimed;
 }
@@ -3970,6 +4042,7 @@ static int kswapd(void *p)
 	for ( ; ; ) {
 		bool ret;
 
+		ktime_t event_ts;
 		alloc_order = reclaim_order = READ_ONCE(pgdat->kswapd_order);
 		classzone_idx = kswapd_classzone_idx(pgdat, classzone_idx);
 
@@ -4004,7 +4077,9 @@ kswapd_try_sleep:
 		 */
 		trace_mm_vmscan_kswapd_wake(pgdat->node_id, classzone_idx,
 						alloc_order);
+		mm_event_start(&event_ts);
 		reclaim_order = balance_pgdat(pgdat, alloc_order, classzone_idx);
+		mm_event_end(MM_RECLAIM, event_ts);
 		if (reclaim_order < alloc_order)
 			goto kswapd_try_sleep;
 	}
