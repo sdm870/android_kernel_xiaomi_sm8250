@@ -19,16 +19,21 @@
 #include "dsi_clk.h"
 #include "dsi_pwr.h"
 #include "dsi_parser.h"
-#include "msm_drv.h"
 #include "dsi_panel_mi.h"
+#include "msm_drv.h"
 
 #define MAX_BL_LEVEL 4096
 #define MAX_BL_SCALE_LEVEL 1024
 #define MAX_SV_BL_SCALE_LEVEL 65535
 #define DSI_CMD_PPS_SIZE 135
+#define BL_RANGE_MAX 10
 
 #define DSI_MODE_MAX 32
+#define HBM_RANGE_MAX 4
 
+#define BL_STATE_STANDBY	BL_CORE_FBBLANK
+#define BL_STATE_LP		BL_CORE_LP1
+#define BL_STATE_LP2		BL_CORE_LP2
 /*
  * Defining custom dsi msg flag,
  * continued from drm_mipi_dsi.h
@@ -76,6 +81,13 @@ enum dsi_panel_physical_type {
 	DSI_DISPLAY_PANEL_TYPE_MAX,
 };
 
+enum hbm_mode_type {
+	HBM_MODE_OFF = 0,
+	HBM_MODE_ON,
+	HBM_MODE_SV,
+	HBM_MODE_MAX,
+};
+
 struct dsi_dfps_capabilities {
 	enum dsi_dfps_type type;
 	u32 min_refresh_rate;
@@ -83,6 +95,13 @@ struct dsi_dfps_capabilities {
 	u32 *dfps_list;
 	u32 dfps_list_len;
 	bool dfps_support;
+};
+
+struct dsi_qsync_capabilities {
+	/* qsync disabled if qsync_min_fps = 0 */
+	u32 qsync_min_fps;
+	u32 *qsync_min_fps_list;
+	int qsync_min_fps_list_len;
 };
 
 struct dsi_dyn_clk_caps {
@@ -105,6 +124,69 @@ struct dsi_panel_phy_props {
 	enum dsi_panel_rotation rotation;
 };
 
+struct hbm_range {
+	/* Userspace brightness range (inclusive) for this HBM range */
+	u32 user_bri_start;
+	u32 user_bri_end;
+
+	/* Panel brightness range (inclusive) for this HBM range */
+	u32 panel_bri_start;
+	u32 panel_bri_end;
+
+	/* Command to be sent to the panel when entering this HBM range */
+	struct dsi_panel_cmd_set entry_cmd;
+	/*
+	 * Command to be sent to the panel to stop brightness dimming while
+	 * in this HBM range.
+	 */
+	struct dsi_panel_cmd_set dimming_stop_cmd;
+	/* Number of frames dimming will take. */
+	u32 num_dimming_frames;
+};
+
+struct hbm_data {
+	/* IRC register address */
+	u8 irc_addr;
+	u8 *irc_data;
+	u32 irc_bit_offset;
+
+	/* Command to be sent to the panel to irc unlock */
+	struct dsi_panel_cmd_set irc_unlock_cmd;
+	/* Command to be sent to the panel to irc lock  */
+	struct dsi_panel_cmd_set irc_lock_cmd;
+
+	/* Command to be sent to the panel when exiting HBM */
+	struct dsi_panel_cmd_set exit_cmd;
+	/* Command to be sent to the panel to stop brightness dimming */
+	struct dsi_panel_cmd_set exit_dimming_stop_cmd;
+	/* Number of frames dimming will take */
+	u32 exit_num_dimming_frames;
+
+	struct hbm_range ranges[HBM_RANGE_MAX];
+	u32 num_ranges;
+	u32 cur_range;
+
+	/* Brightness dimming currently active */
+	bool dimming_active;
+	/* Total number of frames brightness dimming takes */
+	u32 dimming_frames_total;
+	/* Number of frames remaining until brightness settles */
+	u32 dimming_frames_left;
+	/* DSI command to send once brightness dimming settles */
+	struct dsi_panel_cmd_set *dimming_stop_cmd;
+
+	/* Work queue used to count frames during dimming */
+	struct workqueue_struct *dimming_workq;
+	struct work_struct dimming_work;
+	struct dsi_panel *panel;
+};
+
+struct bl_notifier_data {
+	u32 ranges[BL_RANGE_MAX];
+	u32 num_ranges;
+	u32 cur_range;
+};
+
 struct dsi_backlight_config {
 	enum dsi_backlight_type type;
 	enum bl_update_flag bl_update;
@@ -112,21 +194,51 @@ struct dsi_backlight_config {
 	u32 bl_min_level;
 	u32 bl_max_level;
 	u32 brightness_max_level;
-	u32 brightness_init_level;
-	u32 bl_level;
 	u32 bl_scale;
 	u32 bl_scale_sv;
-	bool bl_inverted_dbv;
+	u32 bl_actual;
+	u16 *lut;
+	bool bl_update_pending;
+	bool allow_bl_update;
+	bool dimming_mode;
+	u32 high_byte_offset;
+	unsigned int last_state;
+	struct mutex state_lock;
+
+	struct bl_notifier_data *bl_notifier;
+	struct hbm_data *hbm;
 
 	int en_gpio;
-	/* PWM params */
-	struct pwm_device *pwm_bl;
-	bool pwm_enabled;
-	u32 pwm_period_usecs;
+	struct backlight_device *bl_device;
+	struct regulator *lab_vreg;
 
 	/* WLED params */
-	struct led_trigger *wled;
 	struct backlight_device *raw_bd;
+
+	void *priv;
+
+	/**
+	 * update_bl - function used to update backlight
+	 * @bl_cfg - ptr to backlight config struct
+	 * @bl_lvl - backlight level set
+	 *
+	 * return: non-zero on success otherwise errno
+	 */
+	int (*update_bl)(struct dsi_backlight_config *bl_cfg, u32 bl_lvl);
+
+	/**
+	 * unregister - unregisters and frees any backlight data
+	 * @bl_cfg - ptr to backlight config struct
+	 */
+	void (*unregister)(struct dsi_backlight_config *bl_cfg);
+
+	/**
+	 * debugfs_init - debugfs initialization for DSI backlight
+	 * @parent - dentry to create
+	 * @bl_cfg - ptr to backlight config struct
+	 */
+	void (*debugfs_init)(struct dentry *parent,
+			     struct dsi_backlight_config *bl_cfg);
 };
 
 struct dsi_reset_seq {
@@ -142,6 +254,11 @@ struct dsi_panel_reset_config {
 	int disp_en_gpio;
 	int lcd_mode_sel_gpio;
 	u32 mode_sel_state;
+};
+
+struct dsi_panel_debug {
+	u8 reg_read_cmd;
+	size_t reg_read_len;
 };
 
 enum esd_check_status_mode {
@@ -164,6 +281,44 @@ struct drm_panel_esd_config {
 	u8 *return_buf;
 	u8 *status_buf;
 	u32 groups;
+};
+
+struct dsi_panel_sn_location {
+	u32 start_byte;
+	u32 sn_length;
+	u8 addr;
+};
+
+struct dsi_panel_vendor_info {
+	struct dsi_panel_sn_location location;
+	bool is_sn;
+	u8 *sn;
+	const char *name;
+	u8 extinfo_loc_length;
+	u32 *extinfo_loc;
+	u8 extinfo_length;
+	u8 extinfo_read;
+	u8 *extinfo;
+};
+
+struct dsi_panel_te2_edge {
+	u16 rising;
+	u16 falling;
+};
+
+enum dsi_panel_te2_type {
+	TE2_EDGE_90HZ,
+	TE2_EDGE_60HZ,
+	TE2_EDGE_LP_HIGH,
+	TE2_EDGE_LP_LOW,
+	TE2_EDGE_MAX
+};
+
+struct dsi_panel_te2_config {
+	struct dsi_panel_te2_edge te2_edge[TE2_EDGE_MAX];
+	enum dsi_panel_te2_type current_type;
+	bool te2_ready;
+	u32 lp_threshold;
 };
 
 struct dsi_panel {
@@ -194,12 +349,16 @@ struct dsi_panel {
 	struct dsi_regulator_info power_info;
 	struct dsi_backlight_config bl_config;
 	struct dsi_panel_reset_config reset_config;
+	struct dsi_panel_te2_config te2_config;
 	struct dsi_pinctrl_info pinctrl;
 	struct drm_panel_hdr_properties hdr_props;
 	struct drm_panel_esd_config esd_config;
+	struct dsi_panel_debug debug;
 
 	struct dsi_parser_utils utils;
+	struct dsi_panel_vendor_info vendor_info;
 
+	u32 init_delay_us;
 	bool lp11_init;
 	bool ulps_feature_enabled;
 	bool ulps_suspend_enabled;
@@ -209,7 +368,7 @@ struct dsi_panel {
 
 	bool panel_initialized;
 	bool te_using_watchdog_timer;
-	u32 qsync_min_fps;
+	struct dsi_qsync_capabilities qsync_caps;
 
 	char dsc_pps_cmd[DSI_CMD_PPS_SIZE];
 	enum dsi_dms_mode dms_mode;
@@ -220,6 +379,49 @@ struct dsi_panel {
 	int panel_test_gpio;
 	int power_mode;
 	enum dsi_panel_physical_type panel_type;
+
+	const struct dsi_panel_funcs *funcs;
+	void *private_data;
+
+	/* the following set of members are guarded by panel_lock */
+	enum hbm_mode_type hbm_mode;
+	bool hbm_pending_irc_on;
+	bool hbm_sv_enabled;
+	/* Work used to handle hbmsv hang */
+	struct delayed_work hanghandler_work;
+};
+
+/**
+ * struct dsi_panel_funcs - functions that handle panel switch operations
+ *
+ * @pre_disable: called before panel is about to be disabled
+ * @post_enable: called on panel post enable
+ * @mode_switch: called when a mode switch is happening
+ * @pre_kickoff: called just before frame kickoff
+ * @idle: called when updates haven't been received for a while (idle)
+ * @wakeup: called when coming out of idle state
+ * @pre_lp1: called before power mode is going to be lp1
+ * @update_te2: called when te2 configuration needs to be updated
+ *
+ * Note: none of these functions above should be called while holding panel_lock
+ *
+ * @update_hbm: for certain projects hbm/dimming configuration may need to be
+ * kept in sync depending on current mode. This function should be called with
+ * updated hbm/dimming params
+ * @send_nolp: called when sending nolp commands
+ */
+struct dsi_panel_funcs {
+	int (*pre_disable)(struct dsi_panel *);
+	int (*post_enable)(struct dsi_panel *);
+	int (*mode_switch)(struct dsi_panel *);
+	int (*pre_kickoff)(struct dsi_panel *);
+	int (*idle)(struct dsi_panel *);
+	int (*wakeup)(struct dsi_panel *);
+	int (*pre_lp1)(struct dsi_panel *);
+	int (*update_te2)(struct dsi_panel *panel);
+	int (*update_hbm)(struct dsi_panel *);
+	int (*update_irc)(struct dsi_panel *, bool);
+	int (*send_nolp)(struct dsi_panel *);
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
@@ -247,6 +449,11 @@ static inline bool dsi_panel_is_type_oled(struct dsi_panel *panel)
 	return (panel->panel_type == DSI_DISPLAY_PANEL_TYPE_OLED);
 }
 
+static inline bool is_standby_mode(unsigned long state)
+{
+	return (state & BL_STATE_STANDBY) != 0;
+}
+
 struct dsi_panel *dsi_panel_get(struct device *parent,
 				struct device_node *of_node,
 				struct device_node *parser_node,
@@ -260,6 +467,8 @@ void dsi_panel_put(struct dsi_panel *panel);
 int dsi_panel_drv_init(struct dsi_panel *panel, struct mipi_dsi_host *host);
 
 int dsi_panel_drv_deinit(struct dsi_panel *panel);
+
+void dsi_panel_debugfs_init(struct dsi_panel *panel, struct dentry *dir);
 
 int dsi_panel_get_mode_count(struct dsi_panel *panel);
 
@@ -304,8 +513,6 @@ int dsi_panel_unprepare(struct dsi_panel *panel);
 
 int dsi_panel_post_unprepare(struct dsi_panel *panel);
 
-int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl);
-
 int dsi_panel_update_pps(struct dsi_panel *panel);
 
 int dsi_panel_send_qsync_on_dcs(struct dsi_panel *panel,
@@ -325,11 +532,7 @@ int dsi_panel_switch(struct dsi_panel *panel);
 
 int dsi_panel_post_switch(struct dsi_panel *panel);
 
-int dsi_panel_dc_switch(struct dsi_panel *panel);
-
 void dsi_dsc_pclk_param_calc(struct msm_display_dsc_info *dsc, int intf_width);
-
-void dsi_panel_bl_handoff(struct dsi_panel *panel);
 
 struct dsi_panel *dsi_panel_ext_bridge_get(struct device *parent,
 				struct device_node *of_node,
@@ -342,18 +545,55 @@ void dsi_panel_ext_bridge_put(struct dsi_panel *panel);
 void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
 		struct dsi_display_mode *mode, u32 frame_threshold_us);
 
-int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
-				enum dsi_cmd_set_type type);
-int dsi_panel_update_backlight(struct dsi_panel *panel,
-				u32 bl_lvl);
-int dsi_panel_get_cmd_pkt_count(const char *data, u32 length, u32 *cnt);
-int dsi_panel_alloc_cmd_packets(struct dsi_panel_cmd_set *cmd,
-				u32 packet_count);
-int dsi_panel_create_cmd_packets(const char *data,
-				u32 length,
-				u32 count,
-				struct dsi_cmd_desc *cmd);
+int dsi_panel_cmd_set_transfer(struct dsi_panel *panel,
+			       struct dsi_panel_cmd_set *cmd);
+int dsi_panel_parse_dt_cmd_set(struct device_node *of_node,
+			       const char *cmd_str,
+			       const char *cmd_state_str,
+			       struct dsi_panel_cmd_set *cmd);
 void dsi_panel_destroy_cmd_packets(struct dsi_panel_cmd_set *set);
 void dsi_panel_dealloc_cmd_packets(struct dsi_panel_cmd_set *set);
+
+int dsi_panel_debugfs_create_cmdset(struct dentry *parent,
+				    const char *label,
+				    struct dsi_panel *panel,
+				    struct dsi_panel_cmd_set *set);
+
+int dsi_backlight_early_dpms(struct dsi_backlight_config *bl, int power_state);
+int dsi_backlight_late_dpms(struct dsi_backlight_config *bl, int power_state);
+
+int dsi_backlight_get_dpms(struct dsi_backlight_config *bl);
+
+int dsi_backlight_hbm_dimming_start(struct dsi_backlight_config *bl,
+	u32 num_frames, struct dsi_panel_cmd_set *stop_cmd);
+void dsi_backlight_hbm_dimming_stop(struct dsi_backlight_config *bl);
+
+int dsi_panel_bl_register(struct dsi_panel *panel);
+int dsi_panel_bl_unregister(struct dsi_panel *panel);
+int dsi_panel_bl_parse_config(struct device *parent,
+			      struct dsi_backlight_config *bl);
+int dsi_panel_bl_brightness_handoff(struct dsi_panel *panel);
+void dsi_panel_bl_debugfs_init(struct dentry *parent, struct dsi_panel *panel);
+
+/* Set/get high brightness mode */
+int dsi_panel_update_hbm(struct dsi_panel *panel, enum hbm_mode_type);
+enum hbm_mode_type dsi_panel_get_hbm(struct dsi_panel *panel);
+
+int dsi_panel_bl_update_irc(struct dsi_backlight_config *bl, bool enable);
+
+int dsi_panel_switch_init(struct dsi_panel *panel);
+void dsi_panel_switch_destroy(struct dsi_panel *panel);
+void dsi_panel_switch_put_mode(struct dsi_display_mode *mode);
+int dsi_panel_switch_update_hbm(struct dsi_panel *panel);
+
+int dsi_panel_idle(struct dsi_panel *panel);
+int dsi_panel_wakeup(struct dsi_panel *panel);
+
+int dsi_panel_get_sn(struct dsi_panel *panel);
+int dsi_panel_get_vendor_extinfo(struct dsi_panel *panel);
+
+ssize_t parse_byte_buf(u8 *out, size_t out_len, char *src, size_t src_len);
+int parse_u32_buf(char *src, size_t src_len, u32 *out, size_t out_len);
+const struct dsi_display_mode *get_panel_display_mode(struct dsi_panel *panel);
 
 #endif /* _DSI_PANEL_H_ */

@@ -1893,9 +1893,8 @@ static void dspp_ltm_install_property(struct drm_crtc *crtc)
 
 	ltm_sw_fuse = sde_hw_get_ltm_sw_fuse_value(kms->hw_sw_fuse);
 	DRM_DEBUG_DRIVER("ltm_sw_fuse value: 0x%x\n", ltm_sw_fuse);
-	if (ltm_sw_fuse != SW_FUSE_ENABLE) {
+	if (ltm_sw_fuse != SW_FUSE_ENABLE)
 		pr_info("ltm_sw_fuse is not enabled: 0x%x\n", ltm_sw_fuse);
-	}
 
 	catalog = kms->catalog;
 	version = catalog->dspp[0].sblk->ltm.version >> 16;

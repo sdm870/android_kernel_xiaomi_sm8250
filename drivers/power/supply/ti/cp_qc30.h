@@ -74,6 +74,10 @@ enum hvdcp3_type {
 	HVDCP3P5_CLASSB_27W,
 };
 
+#define MAIN_CHG_VOTER                  "MAIN_CHG_VOTER"
+#define QC3_MAIN_CHARGER_ICL            2000000
+#define QC3_CHARGER_ICL                 500000
+
 #define HVDCP3_CLASS_B_BAT_CURRENT_MA			5400
 #define HVDCP3_CLASS_B_BUS_CURRENT_MA			2700
 #define HVDCP3_CLASS_A_BAT_CURRENT_MA			3600
@@ -220,6 +224,7 @@ typedef struct {
 	struct bq2597x			bq2597x;
 	struct sw_charger			sw_chager;
 	struct votable		*fcc_votable;
+	struct votable		*usb_icl_votable;
 
 	struct power_supply *fc_psy;
 	struct power_supply *sw_psy;

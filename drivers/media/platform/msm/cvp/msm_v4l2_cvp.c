@@ -282,7 +282,7 @@ static struct attribute_group msm_cvp_core_attr_group = {
 		.attrs = msm_cvp_core_attrs,
 };
 
-static const struct of_device_id msm_cvp_dt_match[] = {
+static const struct of_device_id msm_v4l2_cvp_dt_match[] = {
 	{.compatible = "qcom,msm-cvp"},
 	{.compatible = "qcom,msm-cvp,context-bank"},
 	{.compatible = "qcom,msm-cvp,bus"},
@@ -397,7 +397,7 @@ static int msm_probe_cvp_device(struct platform_device *pdev)
 	 * context-bank details and store it in core->resources.context_banks
 	 * list.
 	 */
-	rc = of_platform_populate(pdev->dev.of_node, msm_cvp_dt_match, NULL,
+	rc = of_platform_populate(pdev->dev.of_node, msm_v4l2_cvp_dt_match, NULL,
 			&pdev->dev);
 	if (rc) {
 		dprintk(CVP_ERR, "Failed to trigger probe for sub-devices\n");
@@ -534,14 +534,14 @@ static const struct dev_pm_ops msm_cvp_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(msm_cvp_pm_suspend, msm_cvp_pm_resume)
 };
 
-MODULE_DEVICE_TABLE(of, msm_cvp_dt_match);
+MODULE_DEVICE_TABLE(of, msm_v4l2_cvp_dt_match);
 
 static struct platform_driver msm_cvp_driver = {
 	.probe = msm_cvp_probe,
 	.remove = msm_cvp_remove,
 	.driver = {
 		.name = "msm_cvp_v4l2",
-		.of_match_table = msm_cvp_dt_match,
+		.of_match_table = msm_v4l2_cvp_dt_match,
 		.pm = &msm_cvp_pm_ops,
 	},
 };
@@ -580,13 +580,19 @@ static int __init msm_cvp_init(void)
 	cvp_driver->frame_cache = KMEM_CACHE(msm_cvp_frame, 0);
 	cvp_driver->frame_buf_cache = KMEM_CACHE(msm_cvp_frame_buf, 0);
 	cvp_driver->internal_buf_cache = KMEM_CACHE(msm_cvp_internal_buffer, 0);
-
+#ifdef MSM_CVP_V4L2_MODULE
+	rc = cvp_dsp_device_init();
+	if (rc)
+		msm_cvp_exit();
+#endif
 	return rc;
 }
 
 static void __exit msm_cvp_exit(void)
 {
-
+#ifdef MSM_CVP_V4L2_MODULE
+	cvp_dsp_device_exit();
+#endif
 	kmem_cache_destroy(cvp_driver->msg_cache);
 	kmem_cache_destroy(cvp_driver->fence_data_cache);
 	kmem_cache_destroy(cvp_driver->frame_cache);

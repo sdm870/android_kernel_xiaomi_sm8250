@@ -29,8 +29,8 @@
 #include <linux/suspend.h>
 #include <linux/syscore_ops.h>
 #include <linux/swait.h>
-#include <linux/rtc.h>
 #include <linux/ftrace.h>
+#include <linux/rtc.h>
 #include <trace/events/power.h>
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
@@ -840,8 +840,8 @@ int pm_suspend(suspend_state_t state)
 	stop_suspend_mon();
 #endif
 
-	pr_info("suspend exit\n");
 	pm_suspend_marker("exit");
+	pr_info("suspend exit\n");
 
 	return error;
 }

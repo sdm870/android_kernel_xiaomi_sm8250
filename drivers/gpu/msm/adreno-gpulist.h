@@ -938,7 +938,7 @@ static const struct adreno_a6xx_core adreno_gpu_core_a619 = {
 	},
 	.prim_fifo_threshold = 0x0018000,
 	.gmu_major = 1,
-	.gmu_minor = 10,
+	.gmu_minor = 11,
 	.sqefw_name = "a630_sqe.fw",
 	.gmufw_name = "a619_gmu.bin",
 	.zap_name = "a615_zap",
@@ -1400,7 +1400,7 @@ static const struct adreno_a6xx_core adreno_gpu_core_a610 = {
 	.base = {
 		DEFINE_ADRENO_REV(ADRENO_REV_A610, 6, 1, 0, ANY_ID),
 		.features = ADRENO_64BIT | ADRENO_CONTENT_PROTECTION |
-			ADRENO_PREEMPTION | ADRENO_PROCESS_RECLAIM,
+			ADRENO_PREEMPTION,
 		.gpudev = &adreno_a6xx_gpudev,
 		.gmem_size = (SZ_128K + SZ_4K),
 		.busy_mask = 0xfffffffe,
@@ -1479,8 +1479,7 @@ static const struct adreno_a6xx_core adreno_gpu_core_a702 = {
 	.base = {
 		DEFINE_ADRENO_REV(ADRENO_REV_A702, 7, 0, 2, ANY_ID),
 		.features = ADRENO_64BIT | ADRENO_CONTENT_PROTECTION |
-			ADRENO_APRIV | ADRENO_PREEMPTION |
-			ADRENO_PROCESS_RECLAIM,
+			ADRENO_APRIV | ADRENO_PREEMPTION,
 		.gpudev = &adreno_a6xx_gpudev,
 		.gmem_size = SZ_128K,
 		.busy_mask = 0xfffffffe,

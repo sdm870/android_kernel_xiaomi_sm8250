@@ -12,6 +12,7 @@ enum mm_event_type {
 	MM_READ_IO = 2,
 	MM_COMPACTION = 3,
 	MM_RECLAIM = 4,
+	MM_SWP_FAULT = 5,
 	MM_KERN_ALLOC = 6,
 	BLK_READ_SUBMIT_BIO = 7,
 	UFS_READ_QUEUE_CMD = 8,

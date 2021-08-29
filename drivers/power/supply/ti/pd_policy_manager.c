@@ -981,9 +981,9 @@ static int usbpd_pm_fc2_charge_algo(struct usbpd_pm *pdpm)
 
 	/* battery charge current loop*/
 	if (!pdpm->use_qcom_gauge) {
-		if (pdpm->cp.ibat_curr < curr_fcc_limit)
+		if (pdpm->cp.ibat_curr < (curr_fcc_limit - 90))
 			step_ibat = pm_config.fc2_steps;
-		else if (pdpm->cp.ibat_curr > curr_fcc_limit + 50)
+		else if (pdpm->cp.ibat_curr > (curr_fcc_limit))
 			step_ibat = -pm_config.fc2_steps;
 		pr_info("step_ibat:%d\n", step_ibat);
 	}
@@ -1108,9 +1108,6 @@ static int usbpd_pm_fc2_charge_algo(struct usbpd_pm *pdpm)
 	pr_info("steps: %d, sw_ctrl_steps:%d, hw_ctrl_steps:%d\n", steps, sw_ctrl_steps, hw_ctrl_steps);
 	pdpm->request_voltage += steps * STEP_MV;
 
-	pdpm->request_current = min(pdpm->apdo_max_curr, curr_ibus_limit);
-	pr_info("steps: %d, pdpm->request_voltage: %d\n", steps, pdpm->request_voltage);
-
 	/*if (pdpm->apdo_max_volt == PPS_VOL_MAX)
 		pdpm->apdo_max_volt = pdpm->apdo_max_volt - PPS_VOL_HYS;*/
 
@@ -1146,13 +1143,12 @@ static void usbpd_pm_move_state(struct usbpd_pm *pdpm, enum pm_state state)
 static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 {
 	int ret;
-	int rc = 0;
 	static int tune_vbus_retry;
 	static bool stop_sw;
 	static bool recover;
 	int effective_fcc_val = 0;
 	int thermal_level = 0, capacity;
-	static int curr_fcc_lmt, curr_ibus_lmt;
+	static int curr_fcc_lmt, curr_ibus_lmt, retry_count;
 
 	switch (pdpm->state) {
 	case PD_PM_STATE_ENTRY:
@@ -1175,6 +1171,14 @@ static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 		}
 
 		if (pdpm->cp.vbat_volt < pm_config.min_vbat_for_cp) {
+			/* select 6V,2.3A*/
+			if (pdpm->apdo_max_curr >= 2300)
+				/* select 6V,2.3A*/
+				usbpd_select_pdo(pdpm->pd, pdpm->apdo_selected_pdo,
+					6000000, 2300000);
+			else
+				usbpd_select_pdo(pdpm->pd, pdpm->apdo_selected_pdo,
+					6000000, pdpm->apdo_max_curr * 1000);
 			pr_info("batt_volt %d, waiting...\n", pdpm->cp.vbat_volt);
 		} else if ((pdpm->cp.vbat_volt > pm_config.bat_volt_lp_lmt - VBAT_HIGH_FOR_FC_HYS_MV
 			&& !pdpm->is_temp_out_fc2_range) || capacity >= CAPACITY_TOO_HIGH_THR) {
@@ -1191,6 +1195,17 @@ static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 		} else if (pdpm->cp_sec_enable && !pdpm->cp_sec.batt_connecter_present) {
 			pr_info("sec batt connecter miss! charging with switch charger\n");
 			usbpd_pm_move_state(pdpm, PD_PM_STATE_FC2_EXIT);
+		} else if (thermal_level >= MAX_THERMAL_LEVEL
+				|| pdpm->is_temp_out_fc2_range) {
+			/* select 6V,2.3A*/
+			if (pdpm->apdo_max_curr >= 2300)
+				/* select 6V,2.3A*/
+				usbpd_select_pdo(pdpm->pd, pdpm->apdo_selected_pdo,
+					6000000, 2300000);
+			else
+				usbpd_select_pdo(pdpm->pd, pdpm->apdo_selected_pdo,
+					6000000, pdpm->apdo_max_curr * 1000);
+			pr_info("thermal too high or batt temp is out of fc2 range, waiting...\n");
 		} else {
 			pr_info("batt_volt-%d is ok, start flash charging\n",
 					pdpm->cp.vbat_volt);
@@ -1209,12 +1224,15 @@ static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 		} else {
 			usbpd_pm_move_state(pdpm, PD_PM_STATE_FC2_ENTRY_1);
 		}
+		retry_count = 0;
 		break;
 
 	case PD_PM_STATE_FC2_ENTRY_1:
-		pdpm->request_voltage = pdpm->cp.vbat_volt * 2 + BUS_VOLT_INIT_UP;
-		//pdpm->request_current = min(pdpm->apdo_max_curr, pm_config.bus_curr_lp_lmt);
-		pdpm->request_current = min(pdpm->apdo_max_curr, curr_ibus_lmt);
+		if (retry_count >= 1)
+			pdpm->request_voltage += STEP_MV;
+		else
+			pdpm->request_voltage = pdpm->cp.vbat_volt * 2 + BUS_VOLT_INIT_UP;
+		pdpm->request_current = pdpm->apdo_max_curr;
 
 		usbpd_select_pdo(pdpm->pd, pdpm->apdo_selected_pdo,
 				pdpm->request_voltage * 1000, pdpm->request_current * 1000);
@@ -1245,9 +1263,15 @@ static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 			break;
 		}
 
-		if (tune_vbus_retry > 80) {
-			pr_info("Failed to tune adapter volt into valid range, charge with switching charger\n");
-			usbpd_pm_move_state(pdpm, PD_PM_STATE_FC2_EXIT);
+		if (tune_vbus_retry > 25) {
+			if (retry_count < 1) {
+				usbpd_pm_move_state(pdpm, PD_PM_STATE_FC2_ENTRY_1);
+				retry_count++;
+				pr_info("Failed to tune adapter volt into valid range, retry again\n");
+			} else {
+				pr_info("Failed to tune adapter volt into valid range, charge with switching charger\n");
+				usbpd_pm_move_state(pdpm, PD_PM_STATE_FC2_EXIT);
+			}
 		}
 		break;
 
@@ -1328,8 +1352,14 @@ static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 		break;
 
 	case PD_PM_STATE_FC2_EXIT:
-		/* select default 5V*/
-		usbpd_select_pdo(pdpm->pd, 1, 0, 0);
+		/* select 6V,2.3A*/
+		if (pdpm->apdo_max_curr >= 2300)
+			/* select 6V,2.3A*/
+			usbpd_select_pdo(pdpm->pd, pdpm->apdo_selected_pdo,
+				6000000, 2300000);
+		else
+			usbpd_select_pdo(pdpm->pd, pdpm->apdo_selected_pdo,
+				6000000, pdpm->apdo_max_curr * 1000);
 		pdpm->no_need_en_slave_bq = false;
 		pdpm->master_ibus_below_critical_low_count = 0;
 
@@ -1359,8 +1389,6 @@ static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 
 		if (recover)
 			usbpd_pm_move_state(pdpm, PD_PM_STATE_ENTRY);
-		else
-			rc = 1;
 
 		break;
 	default:
@@ -1368,7 +1396,7 @@ static int usbpd_pm_sm(struct usbpd_pm *pdpm)
 		break;
 	}
 
-	return rc;
+	return false;
 }
 
 static void usbpd_pm_workfunc(struct work_struct *work)

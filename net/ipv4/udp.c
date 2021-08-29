@@ -3010,8 +3010,8 @@ EXPORT_SYMBOL(udp_flow_hashrnd);
 
 static void __udp_sysctl_init(struct net *net)
 {
-	net->ipv4.sysctl_udp_rmem_min = SK_MEM_QUANTUM;
-	net->ipv4.sysctl_udp_wmem_min = SK_MEM_QUANTUM;
+	net->ipv4.sysctl_udp_rmem_min = 2*SK_MEM_QUANTUM;
+	net->ipv4.sysctl_udp_wmem_min = 2*SK_MEM_QUANTUM;
 
 #ifdef CONFIG_NET_L3_MASTER_DEV
 	net->ipv4.sysctl_udp_l3mdev_accept = 0;

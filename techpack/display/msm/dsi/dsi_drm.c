@@ -3,7 +3,6 @@
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  */
 
-
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_notifier_mi.h>
@@ -12,9 +11,7 @@
 #include "sde_connector.h"
 #include "dsi_drm.h"
 #include "sde_trace.h"
-#include "msm_drv.h"
 #include "sde_dbg.h"
-#include "dsi_defs.h"
 
 #define to_dsi_bridge(x)     container_of((x), struct dsi_bridge, base)
 #define to_dsi_state(x)      container_of((x), struct dsi_connector_state, base)
@@ -72,6 +69,8 @@ static void convert_to_dsi_mode(const struct drm_display_mode *drm_mode,
 		dsi_mode->dsi_mode_flags |= DSI_MODE_FLAG_VBLANK_PRE_MODESET;
 	if (msm_is_mode_seamless_dms(drm_mode))
 		dsi_mode->dsi_mode_flags |= DSI_MODE_FLAG_DMS;
+	if (msm_is_mode_seamless_dms_fps(drm_mode))
+		dsi_mode->dsi_mode_flags |= DSI_MODE_FLAG_DMS_FPS;
 	if (msm_is_mode_seamless_vrr(drm_mode))
 		dsi_mode->dsi_mode_flags |= DSI_MODE_FLAG_VRR;
 	if (msm_is_mode_seamless_poms(drm_mode))
@@ -125,6 +124,8 @@ void dsi_convert_to_drm_mode(const struct dsi_display_mode *dsi_mode,
 		drm_mode->private_flags |= MSM_MODE_FLAG_VBLANK_PRE_MODESET;
 	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_DMS)
 		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_DMS;
+	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_DMS_FPS)
+		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_DMS_FPS;
 	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_VRR)
 		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_VRR;
 	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_POMS)
@@ -169,7 +170,6 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
 	struct mi_drm_notifier notify_data;
-	struct dsi_panel_mi_cfg *mi_cfg = NULL;
 	int power_mode = 0;
 
 	if (!bridge) {
@@ -183,7 +183,6 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	}
 
 	atomic_set(&c_bridge->display->panel->esd_recovery_pending, 0);
-	mi_cfg = &c_bridge->display->panel->mi_cfg;
 
 	/* By this point mode should have been validated through mode_fixup */
 	rc = dsi_display_set_mode(c_bridge->display,
@@ -194,16 +193,10 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 		return;
 	}
 
-	if (mi_cfg->fod_dimlayer_enabled) {
-		power_mode = sde_connector_get_lp(c_bridge->display->drm_conn);
-	} else {
-		power_mode = MI_DRM_BLANK_UNBLANK;
-	}
-
+	power_mode = MI_DRM_BLANK_UNBLANK;
 	notify_data.data = &power_mode;
 	notify_data.id = MSM_DRM_PRIMARY_DISPLAY;
 	mi_drm_notifier_call_chain(MI_DRM_EARLY_EVENT_BLANK, &notify_data);
-
 
 	if (c_bridge->dsi_mode.dsi_mode_flags &
 		(DSI_MODE_FLAG_SEAMLESS | DSI_MODE_FLAG_VRR |
@@ -229,7 +222,6 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 				c_bridge->id, rc);
 		(void)dsi_display_unprepare(c_bridge->display);
 	}
-
 	mi_drm_notifier_call_chain(MI_DRM_EVENT_BLANK, &notify_data);
 	SDE_ATRACE_END("dsi_display_enable");
 
@@ -237,6 +229,9 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	if (rc)
 		DSI_ERR("Continuous splash pipeline cleanup failed, rc=%d\n",
 									rc);
+
+	if (c_bridge->display && c_bridge->display->drm_conn)
+		sde_connector_helper_bridge_pre_enable(c_bridge->display->drm_conn);
 }
 
 static void dsi_bridge_enable(struct drm_bridge *bridge)
@@ -263,13 +258,12 @@ static void dsi_bridge_enable(struct drm_bridge *bridge)
 		DSI_ERR("[%d] DSI display post enabled failed, rc=%d\n",
 		       c_bridge->id, rc);
 
-	if (display && display->drm_conn) {
-		sde_connector_helper_bridge_enable(display->drm_conn);
+	if (c_bridge->display && c_bridge->display->drm_conn) {
+		sde_connector_helper_bridge_post_enable(c_bridge->display->drm_conn);
 		if (c_bridge->dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_POMS)
 			sde_connector_schedule_status_work(display->drm_conn,
 				true);
 	}
-
 }
 
 static void dsi_bridge_disable(struct drm_bridge *bridge)
@@ -306,7 +300,6 @@ static void dsi_bridge_post_disable(struct drm_bridge *bridge)
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
 	struct mi_drm_notifier notify_data;
-	struct dsi_panel_mi_cfg *mi_cfg = NULL;
 	int power_mode = 0;
 
 	if (!bridge) {
@@ -314,14 +307,7 @@ static void dsi_bridge_post_disable(struct drm_bridge *bridge)
 		return;
 	}
 
-	mi_cfg = &c_bridge->display->panel->mi_cfg;
-
-	if (mi_cfg->fod_dimlayer_enabled) {
-		power_mode = sde_connector_get_lp(c_bridge->display->drm_conn);
-	} else {
-		power_mode = MI_DRM_BLANK_POWERDOWN;
-	}
-
+	power_mode = MI_DRM_BLANK_POWERDOWN;
 	notify_data.data = &power_mode;
 	notify_data.id = MSM_DRM_PRIMARY_DISPLAY;
 	mi_drm_notifier_call_chain(MI_DRM_EARLY_EVENT_BLANK, &notify_data);
@@ -344,7 +330,6 @@ static void dsi_bridge_post_disable(struct drm_bridge *bridge)
 		SDE_ATRACE_END("dsi_bridge_post_disable");
 		return;
 	}
-
 	mi_drm_notifier_call_chain(MI_DRM_EVENT_BLANK, &notify_data);
 	SDE_ATRACE_END("dsi_bridge_post_disable");
 }
@@ -463,8 +448,7 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_POMS)) &&
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DYN_CLK)) &&
 			(!crtc_state->active_changed ||
-			 display->is_cont_splash_enabled) &&
-			 display->config.panel_mode == DSI_OP_CMD_MODE) {
+			 display->is_cont_splash_enabled)) {
 			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
 
 			SDE_EVT32(SDE_EVTLOG_FUNC_CASE2,
@@ -626,14 +610,16 @@ int dsi_conn_set_info_blob(struct drm_connector *connector,
 	case DSI_OP_VIDEO_MODE:
 		sde_kms_info_add_keystr(info, "panel mode", "video");
 		sde_kms_info_add_keystr(info, "qsync support",
-				panel->qsync_min_fps ? "true" : "false");
+				panel->qsync_caps.qsync_min_fps ?
+				"true" : "false");
 		break;
 	case DSI_OP_CMD_MODE:
 		sde_kms_info_add_keystr(info, "panel mode", "command");
 		sde_kms_info_add_keyint(info, "mdp_transfer_time_us",
 				mode_info->mdp_transfer_time_us);
 		sde_kms_info_add_keystr(info, "qsync support",
-				panel->qsync_min_fps ? "true" : "false");
+				panel->qsync_caps.qsync_min_fps ?
+				"true" : "false");
 		break;
 	default:
 		DSI_DEBUG("invalid panel type:%d\n", panel->panel_mode);
@@ -1093,7 +1079,6 @@ struct dsi_bridge *dsi_drm_bridge_init(struct dsi_display *display,
 	}
 
 	encoder->bridge = &bridge->base;
-
 	return bridge;
 error_free_bridge:
 	kfree(bridge);

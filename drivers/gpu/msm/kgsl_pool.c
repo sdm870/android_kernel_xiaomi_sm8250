@@ -63,6 +63,15 @@ _kgsl_pool_add_page(struct kgsl_page_pool *pool, struct page *p)
 {
 	kgsl_zero_page(p, pool->pool_order);
 
+	/*
+	 * Sanity check to make sure we don't re-pool a page that
+	 * somebody else has a reference to.
+	 */
+	if (WARN_ON(unlikely(page_count(p) > 1))) {
+		__free_pages(p, pool->pool_order);
+		return;
+	}
+
 	spin_lock(&pool->list_lock);
 	list_add_tail(&p->lru, &pool->page_list);
 	pool->page_count++;
@@ -78,11 +87,14 @@ _kgsl_pool_get_page(struct kgsl_page_pool *pool)
 	struct page *p = NULL;
 
 	spin_lock(&pool->list_lock);
-	if (pool->page_count) {
-		p = list_first_entry(&pool->page_list, struct page, lru);
-		pool->page_count--;
-		list_del(&p->lru);
+
+	p = list_first_entry_or_null(&pool->page_list, struct page, lru);
+	if (p == NULL) {
+		spin_unlock(&pool->list_lock);
+		return NULL;
 	}
+	pool->page_count--;
+	list_del(&p->lru);
 	spin_unlock(&pool->list_lock);
 
 	if (p != NULL)
@@ -272,8 +284,7 @@ static int kgsl_pool_get_retry_order(unsigned int order)
  * Return total page count on success and negative value on failure
  */
 int kgsl_pool_alloc_page(int *page_size, struct page **pages,
-			unsigned int pages_len, unsigned int *align,
-			struct kgsl_memdesc *memdesc)
+			unsigned int pages_len, unsigned int *align)
 {
 	int j;
 	int pcount = 0;
@@ -361,7 +372,7 @@ done:
 
 eagain:
 	*page_size = kgsl_get_page_size(size,
-			ilog2(size), memdesc);
+			ilog2(size));
 	*align = ilog2(*page_size);
 	return -EAGAIN;
 }
@@ -546,13 +557,11 @@ static void kgsl_of_get_mempools(struct device_node *parent)
 	}
 }
 
-void kgsl_init_page_pools(struct kgsl_device *device)
+void kgsl_init_page_pools(struct platform_device *pdev)
 {
-	if (device->flags & KGSL_FLAG_USE_SHMEM)
-		return;
 
 	/* Get GPU mempools data and configure pools */
-	kgsl_of_get_mempools(device->pdev->dev.of_node);
+	kgsl_of_get_mempools(pdev->dev.of_node);
 
 	/* Reserve the appropriate number of pages for each pool */
 	kgsl_pool_reserve_pages();

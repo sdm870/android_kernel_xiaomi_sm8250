@@ -11,7 +11,9 @@
 obj-$(CONFIG_ZSTD_COMPRESS) += zstd_compress.o
 obj-$(CONFIG_ZSTD_DECOMPRESS) += zstd_decompress.o
 
-ccflags-y += -O3
+ccflags-y += -O3 \
+			-mcpu=cortex-a55 \
+			-mfpu=neon-fp-armv8
 ccflags-y += -Wno-deprecated-declarations
 
 zstd_compress-y := \

@@ -3049,7 +3049,7 @@ int smblib_get_prop_batt_health(struct smb_charger *chg,
 		if (stat & BAT_TEMP_STATUS_TOO_COLD_BIT)
 			val->intval = POWER_SUPPLY_HEALTH_COLD;
 		else if (stat & BAT_TEMP_STATUS_TOO_HOT_BIT)
-			val->intval = POWER_SUPPLY_HEALTH_OVERHEAT;
+			val->intval = POWER_SUPPLY_HEALTH_HOT;
 		else if (stat & BAT_TEMP_STATUS_COLD_SOFT_BIT)
 			val->intval = POWER_SUPPLY_HEALTH_COOL;
 		else if (stat & BAT_TEMP_STATUS_HOT_SOFT_BIT)
@@ -7118,7 +7118,7 @@ int smblib_set_prop_pd_active(struct smb_charger *chg,
 		 * It is guaranteed that pd_active is set prior to
 		 * pd_current_max
 		 */
-		vote(chg->usb_icl_votable, PD_VOTER, true, /*USBIN_100MA*/ 0);
+		vote(chg->usb_icl_votable, PD_VOTER, true, USBIN_100MA);
 		vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
 		/*set the fcc to PD_UNVERIFED_CURRENT when pd is not verifed*/

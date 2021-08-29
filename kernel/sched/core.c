@@ -5837,8 +5837,15 @@ SYSCALL_DEFINE3(sched_setaffinity, pid_t, pid, unsigned int, len,
 		return -ENOMEM;
 
 	retval = get_user_cpu_mask(user_mask_ptr, len, new_mask);
-	if (retval == 0)
-		retval = sched_setaffinity(pid, new_mask);
+	if (retval == 0) {
+		if (sched_lib_mask_force != 0 && is_sched_lib_based_app(pid)) {
+				cpumask_t forced_mask = { {sched_lib_mask_force} };
+				cpumask_copy(new_mask, &forced_mask);
+				retval = sched_setaffinity(pid, new_mask);
+			} else {
+				retval = sched_setaffinity(pid, new_mask);
+			}
+	}
 	free_cpumask_var(new_mask);
 	return retval;
 }

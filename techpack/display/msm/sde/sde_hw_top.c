@@ -50,7 +50,7 @@
 #define MDP_WD_TIMER_4_CTL2               0x444
 #define MDP_WD_TIMER_4_LOAD_VALUE         0x448
 
-#define LTM_SW_FUSE_OFFSET 0x10
+#define LTM_SW_FUSE_OFFSET                0x10
 
 #define MDP_TICK_COUNT                    16
 #define XO_CLK_RATE                       19200

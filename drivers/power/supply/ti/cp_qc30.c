@@ -172,6 +172,23 @@ static int cp_get_effective_fcc_val(pm_t pm_state)
 	return effective_fcc_val;
 }
 
+static int cp_get_effective_usb_icl_val(void)
+{
+	int effective_usb_icl_val = 0;
+
+	if (!pm_state.usb_icl_votable)
+		pm_state.usb_icl_votable = find_votable("USB_ICL");
+
+	if (!pm_state.usb_icl_votable) {
+		pr_err("[%s] find votable: USB_ICL failed!\n", __func__);
+		return -EINVAL;
+	}
+
+	effective_usb_icl_val = get_effective_result(pm_state.usb_icl_votable);
+	pr_info("effective_usb_icl_val: %d voted by:%s\n", effective_usb_icl_val, get_effective_client(pm_state.usb_icl_votable));
+	return effective_usb_icl_val;
+}
+
 static struct power_supply *cp_get_fc_psy(void)
 {
 	if (!pm_state.fc_psy) {
@@ -886,7 +903,7 @@ void cp_statemachine(unsigned int port)
 {
 	int ret;
 	static int tune_vbus_retry, tune_vbus_count, retry_enable_bq_count;
-	int thermal_level = 0;
+	int thermal_level = 0, usb_icl_value = 0;
 	static bool recovery;
 
 	if (!pm_state.bq2597x.vbus_pres) {
@@ -976,6 +993,9 @@ void cp_statemachine(unsigned int port)
 	case CP_STATE_SW_ENTRY_2:
 		pr_err("enable sw charger and check enable\n");
 		cp_enable_sw(true);
+		usb_icl_value = cp_get_effective_usb_icl_val();
+		if (pm_state.usb_icl_votable && (usb_icl_value < QC3_MAIN_CHARGER_ICL))
+			vote(pm_state.usb_icl_votable, MAIN_CHG_VOTER, true, QC3_MAIN_CHARGER_ICL);
 		cp_check_sw_enabled();
 		if (pm_state.sw_chager.charge_enabled)
 			cp_move_state(CP_STATE_SW_LOOP);
@@ -1007,6 +1027,9 @@ void cp_statemachine(unsigned int port)
 			if (pm_state.bq2597x.vbat_volt > sys_config.min_vbat_start_flash2) {
 				pr_err("battery volt: %d is ok, proceeding to flash charging...\n",
 					pm_state.bq2597x.vbat_volt);
+				usb_icl_value = cp_get_effective_usb_icl_val();
+				if (pm_state.usb_icl_votable && (usb_icl_value > QC3_CHARGER_ICL))
+					vote(pm_state.usb_icl_votable, MAIN_CHG_VOTER, true, QC3_CHARGER_ICL);
 				cp_move_state(CP_STATE_FLASH2_ENTRY);
 			}
 		}
@@ -1105,6 +1128,7 @@ void cp_statemachine(unsigned int port)
 				pr_err("Failed to tune adapter volt into valid range, charge with switching charger\n");
 				tune_vbus_count++;
 				pm_state.sw_fc2_init_fail = true;
+				recovery = true;
 				cp_move_state(CP_STATE_SW_ENTRY);
 			}
 			break;

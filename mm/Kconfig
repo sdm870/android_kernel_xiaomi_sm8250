@@ -127,36 +127,64 @@ config SPARSEMEM_VMEMMAP
 	 pfn_to_page and page_to_pfn operations.  This is the most
 	 efficient option when sufficient kernel resources are available.
 
+config ANON_MIN_KBYTES
+	int "Default value for vm.anon_min_kbytes"
+	depends on SYSCTL
+	range 0 4294967295
+	default 0
+	help
+	  This option sets the default value for vm.anon_min_kbytes sysctl knob.
+
+	  The vm.anon_min_kbytes sysctl knob provides *hard* protection of
+	  anonymous pages. The anonymous pages on the current node won't be
+	  reclaimed under any conditions when their amount is below
+	  vm.anon_min_kbytes. This knob may be used to prevent excessive swap
+	  thrashing when anonymous memory is low (for example, when memory is
+	  going to be overfilled by compressed data of zram module).
+
+	  Setting this value too high (close to MemTotal) can result in
+	  inability to swap and can lead to early OOM under memory pressure.
+
 config CLEAN_LOW_KBYTES
 	int "Default value for vm.clean_low_kbytes"
 	depends on SYSCTL
-	default "0"
+	range 0 4294967295
+	default 262144
 	help
-	  The vm.clean_low_kbytes sysctl knob provides *best-effort*
-	  protection of clean file pages. The clean file pages on the current
-	  node won't be reclaimed under memory pressure when their amount is
-	  below vm.clean_low_kbytes *unless* we threaten to OOM or have
-	  no free swap space or vm.swappiness=0.
+	  This option sets the default value for vm.clean_low_kbytes sysctl knob.
 
-	  Protection of clean file pages may be used to prevent thrashing and
-	  reducing I/O under low-memory conditions.
+	  The vm.clean_low_kbytes sysctl knob provides *best-effort*
+	  protection of clean file pages. The file pages on the current node
+	  won't be reclaimed under memory pressure when the amount of clean file
+	  pages is below vm.clean_low_kbytes *unless* we threaten to OOM.
+	  Protection of clean file pages using this knob may be used when
+	  swapping is still possible to
+	    - prevent disk I/O thrashing under memory pressure;
+	    - improve performance in disk cache-bound tasks under memory
+	      pressure.
 
 	  Setting it to a high value may result in a early eviction of anonymous
-	  pages into the swap space by attempting to hold the protected amount of
-	  clean file pages in memory.
+	  pages into the swap space by attempting to hold the protected amount
+	  of clean file pages in memory.
 
 config CLEAN_MIN_KBYTES
 	int "Default value for vm.clean_min_kbytes"
 	depends on SYSCTL
-	default "0"
+	range 0 4294967295
+	default 0
 	help
-	  The vm.clean_min_kbytes sysctl knob provides *hard* protection
-	  of clean file pages. The clean file pages on the current node won't be
-	  reclaimed under memory pressure when their amount is below
-	  vm.clean_min_kbytes.
+	  This option sets the default value for vm.clean_min_kbytes sysctl knob.
 
-	  Hard protection of clean file pages may be used to avoid high latency and
-	  prevent livelock in near-OOM conditions.
+	  The vm.clean_min_kbytes sysctl knob provides *hard* protection of
+	  clean file pages. The file pages on the current node won't be
+	  reclaimed under memory pressure when the amount of clean file pages is
+	  below vm.clean_min_kbytes. Hard protection of clean file pages using
+	  this knob may be used to
+	    - prevent disk I/O thrashing under memory pressure even with no free
+	      swap space;
+	    - improve performance in disk cache-bound tasks under memory
+	      pressure;
+	    - avoid high latency and prevent livelock in near-OOM conditions.
 
 	  Setting it to a high value may result in a early out-of-memory condition
 	  due to the inability to reclaim the protected amount of clean file pages
@@ -298,6 +326,18 @@ config COMPACTION
           it and then we would be really interested to hear about that at
           linux-mm@kvack.org.
 
+config PROCESS_RECLAIM
+	bool "Enable process reclaim"
+	depends on PROC_FS
+	default n
+	help
+	 It allows to reclaim pages of the process by /proc/pid/reclaim.
+
+	 (echo file > /proc/PID/reclaim) reclaims file-backed pages only.
+	 (echo anon > /proc/PID/reclaim) reclaims anonymous pages only.
+	 (echo all > /proc/PID/reclaim) reclaims all pages.
+
+	 Any other value is ignored.
 #
 # support for page migration
 #
@@ -564,15 +604,6 @@ config CMA_DEBUGFS
 	help
 	  Turns on the DebugFS interface for CMA.
 
-config  CMA_ALLOW_WRITE_DEBUGFS
-	depends on CMA_DEBUGFS
-	bool "Allow CMA debugfs write"
-	help
-	  Say 'y' here to allow the CMA debugfs write.
-	  CMA debugfs write could be risky as it allows
-	  cma allocation, so it is not recommended to
-	  enable this option on any production device.
-
 config CMA_AREAS
 	int "Maximum count of the CMA areas"
 	depends on CMA
@@ -677,15 +708,6 @@ config ZSMALLOC_STAT
 	  statistics about whats happening in zsmalloc and exports that
 	  information to userspace via debugfs.
 	  If unsure, say N.
-
-config VMAP_LAZY_PURGING_FACTOR
-	int "multiplier to the size of purged vmap areas"
-	default "8" if ARM
-	default "32"
-	help
-	  It is used as a multiplier to the max VA pages purged in a
-	  single attempt. For 32-bit in order to reduce fragmentation
-	  of vmalloc space, we decrease the default value to "8".
 
 config MM_EVENT_STAT
 	bool "Track per-process MM event"
@@ -872,15 +894,6 @@ config SPECULATIVE_PAGE_FAULT
 	 allocating, it is failing its processing and a classic page fault
 	 is then tried.
 
-config HAVE_USERSPACE_LOW_MEMORY_KILLER
-	bool "Have userspace low memory killer"
-	default n
-	help
-	  The page allocator cannot directly call into a
-	  userspace low memory killer as it can call into the OOM killer.
-	  Therefore, add a timeout mechanism to give the userspace
-	  low memory killer a chance to run.
-
 config GUP_BENCHMARK
 	bool "Enable infrastructure for get_user_pages_fast() benchmarking"
 	default n
@@ -894,29 +907,3 @@ config ARCH_HAS_PTE_SPECIAL
 	bool
 
 endmenu
-
-config PROCESS_RECLAIM
-	bool "Enable process reclaim"
-	depends on PROC_FS
-	default y
-	help
-	 It allows to reclaim pages of the process by /proc/pid/reclaim.
-
-	 (echo file > /proc/PID/reclaim) reclaims file-backed pages only.
-	 (echo anon > /proc/PID/reclaim) reclaims anonymous pages only.
-	 (echo all > /proc/PID/reclaim) reclaims all pages.
-
-	 (echo addr size-byte > /proc/PID/reclaim) reclaims pages in
-	 (addr, addr + size-bytes) of the process.
-
-	 Any other value is ignored.
-
-config FORCE_ALLOC_FROM_DMA_ZONE
-	bool "Force certain memory allocators to always return ZONE_DMA32 memory"
-	depends on ZONE_DMA32
-	help
-	  Ensure certain memory allocators always return memory from ZONE_DMA32.
-	  This option helps ensure that clients who require ZONE_DMA32 memory are
-	  always using ZONE_DMA32 memory.
-
-	  If unsure, say "n".

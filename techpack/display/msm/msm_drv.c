@@ -1496,24 +1496,27 @@ static int msm_ioctl_register_event(struct drm_device *dev, void *data,
 	 * calls add to client list and return.
 	 */
 	count = msm_event_client_count(dev, req_event, false);
-	/* Add current client to list */
-	spin_lock_irqsave(&dev->event_lock, flag);
-	list_add_tail(&client->base.link, &priv->client_event_list);
-	spin_unlock_irqrestore(&dev->event_lock, flag);
-
-	if (count)
+	if (count) {
+		/* Add current client to list */
+		spin_lock_irqsave(&dev->event_lock, flag);
+		list_add_tail(&client->base.link, &priv->client_event_list);
+		spin_unlock_irqrestore(&dev->event_lock, flag);
 		return 0;
+	}
 
 	ret = msm_register_event(dev, req_event, file, true);
 	if (ret) {
 		DRM_ERROR("failed to enable event %x object %x object id %d\n",
 			req_event->event, req_event->object_type,
 			req_event->object_id);
-		spin_lock_irqsave(&dev->event_lock, flag);
-		list_del(&client->base.link);
-		spin_unlock_irqrestore(&dev->event_lock, flag);
 		kfree(client);
+	} else {
+		/* Add current client to list */
+		spin_lock_irqsave(&dev->event_lock, flag);
+		list_add_tail(&client->base.link, &priv->client_event_list);
+		spin_unlock_irqrestore(&dev->event_lock, flag);
 	}
+
 	return ret;
 }
 
@@ -1653,6 +1656,13 @@ static int msm_release(struct inode *inode, struct file *filp)
 						false);
 		kfree(node);
 	}
+
+	/**
+	 * Handle preclose operation here for removing fb's whose
+	 * refcount > 1. This operation is not triggered from upstream
+	 * drm as msm_driver does not support DRIVER_LEGACY feature.
+	 */
+	msm_preclose(dev, file_priv);
 
 	return drm_release(inode, filp);
 }
@@ -1814,7 +1824,6 @@ static struct drm_driver msm_driver = {
 				DRIVER_ATOMIC |
 				DRIVER_MODESET,
 	.open               = msm_open,
-	.preclose           = msm_preclose,
 	.postclose          = msm_postclose,
 	.lastclose          = msm_lastclose,
 	.irq_handler        = msm_irq,
@@ -1952,7 +1961,6 @@ static int compare_of(struct device *dev, void *data)
 {
 	return dev->of_node == data;
 }
-
 
 /*
  * Identify what components need to be added by parsing what remote-endpoints
@@ -2199,13 +2207,13 @@ static void msm_pdev_shutdown(struct platform_device *pdev)
 	priv->shutdown_in_progress = true;
 }
 
-static const struct of_device_id dt_match[] = {
+static const struct of_device_id dt_match_msm_drv[] = {
 	{ .compatible = "qcom,mdp4", .data = (void *)KMS_MDP4 },
 	{ .compatible = "qcom,mdss", .data = (void *)KMS_MDP5 },
 	{ .compatible = "qcom,sde-kms", .data = (void *)KMS_SDE },
 	{},
 };
-MODULE_DEVICE_TABLE(of, dt_match);
+MODULE_DEVICE_TABLE(of, dt_match_msm_drv);
 
 static struct platform_driver msm_platform_driver = {
 	.probe      = msm_pdev_probe,
@@ -2213,7 +2221,7 @@ static struct platform_driver msm_platform_driver = {
 	.shutdown   = msm_pdev_shutdown,
 	.driver     = {
 		.name   = "msm_drm",
-		.of_match_table = dt_match,
+		.of_match_table = dt_match_msm_drv,
 		.pm     = &msm_pm_ops,
 		.suppress_bind_attrs = true,
 	},
@@ -2242,8 +2250,76 @@ static void __exit msm_drm_unregister(void)
 	msm_smmu_driver_cleanup();
 }
 
+#ifdef CONFIG_DRM_MSM_MODULE
+static int __init msm_drm_module_init(void)
+{
+	int ret;
+
+	ret = sde_rsc_rpmh_register();
+	if (ret) {
+		pr_err("sde_rsc_rpmh register fails, error:%d\n", ret);
+		return ret;
+	}
+
+	ret = mdss_pll_driver_init();
+	if (ret) {
+		pr_err("mdss_pll_driver_init failed, error %d\n", ret);
+		return ret;
+	}
+
+	ret = sde_wb_register();
+	if (ret) {
+		pr_err("sde_wb register fails, error:%d\n", ret);
+		return ret;
+	}
+
+	ret = sde_rsc_register();
+	if (ret) {
+		pr_err("sde_rsc register fails, error: %d\n", ret);
+		return ret;
+	}
+
+	ret = dsi_display_register();
+	if (ret) {
+		pr_err("dsi_display register fails, error: %d\n", ret);
+		return ret;
+	}
+
+	ret = msm_drm_register();
+	if (ret) {
+		pr_err("msm_drm register fails, error: %d\n", ret);
+		return ret;
+	}
+
+	ret = msm_notifier_register();
+	if (ret) {
+		pr_err("msm_notifier register fails, error: %d\n", ret);
+		return ret;
+	}
+
+	ret = dp_display_init();
+	if (ret)
+		pr_err("dp_display init fails, error: %d\n", ret);
+
+	return ret;
+}
+
+static void __exit msm_drm_module_cleanup(void)
+{
+	dp_display_cleanup();
+	msm_notifier_unregister();
+	msm_drm_unregister();
+	dsi_display_unregister();
+	sde_rsc_unregister();
+	sde_wb_unregister();
+	mdss_pll_driver_deinit();
+}
+module_init(msm_drm_module_init);
+module_exit(msm_drm_module_cleanup);
+#else
 module_init(msm_drm_register);
 module_exit(msm_drm_unregister);
+#endif
 
 MODULE_AUTHOR("Rob Clark <robdclark@gmail.com");
 MODULE_DESCRIPTION("MSM DRM Driver");

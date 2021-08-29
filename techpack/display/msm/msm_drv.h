@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -128,7 +128,6 @@ enum msm_mdp_plane_property {
 	PLANE_PROP_SRC_CONFIG,
 	PLANE_PROP_FB_TRANSLATION_MODE,
 	PLANE_PROP_MULTIRECT_MODE,
-	PLANE_PROP_MI_LAYER_INFO,
 
 	/* total # of properties */
 	PLANE_PROP_COUNT
@@ -164,7 +163,6 @@ enum msm_mdp_crtc_property {
 	CRTC_PROP_CAPTURE_OUTPUT,
 
 	CRTC_PROP_IDLE_PC_STATE,
-	CRCT_PROP_MI_FOD_SYNC_INFO,
 
 	/* total # of properties */
 	CRTC_PROP_COUNT
@@ -514,6 +512,7 @@ struct msm_resource_caps_info {
  *				 used instead of panel TE in cmd mode panels
  * @roi_caps:           Region of interest capability info
  * @qsync_min_fps	Minimum fps supported by Qsync feature
+ * @has_qsync_min_fps_list True if dsi-supported-qsync-min-fps-list exits
  * @te_source		vsync source pin information
  */
 struct msm_display_info {
@@ -537,6 +536,8 @@ struct msm_display_info {
 	struct msm_roi_caps roi_caps;
 
 	uint32_t qsync_min_fps;
+	bool has_qsync_min_fps_list;
+
 	uint32_t te_source;
 };
 
@@ -708,7 +709,6 @@ struct msm_drm_private {
 
 	/* update the flag when msm driver receives shutdown notification */
 	bool shutdown_in_progress;
-	ktime_t  complete_commit_time;
 
 	struct msm_idle idle;
 };
@@ -726,6 +726,7 @@ int msm_atomic_prepare_fb(struct drm_plane *plane,
 void msm_atomic_commit_tail(struct drm_atomic_state *state);
 int msm_atomic_commit(struct drm_device *dev,
 	struct drm_atomic_state *state, bool nonblock);
+int msm_drm_notifier_call_chain(unsigned long val, void *v);
 
 /* callback from wq once fence has passed: */
 struct msm_fence_cb {
@@ -893,7 +894,8 @@ struct drm_framebuffer *msm_framebuffer_create(struct drm_device *dev,
 		struct drm_file *file, const struct drm_mode_fb_cmd2 *mode_cmd);
 struct drm_framebuffer * msm_alloc_stolen_fb(struct drm_device *dev,
 		int w, int h, int p, uint32_t format);
-
+int msm_fb_obj_get_attrs(struct drm_gem_object *obj, int *fb_ns,
+		int *fb_sec, int *fb_sec_dir, unsigned long *flags);
 struct drm_fb_helper *msm_fbdev_init(struct drm_device *dev);
 void msm_fbdev_free(struct drm_device *dev);
 
@@ -1048,5 +1050,21 @@ static inline unsigned long timeout_to_jiffies(const ktime_t *timeout)
 int msm_get_mixer_count(struct msm_drm_private *priv,
 		const struct drm_display_mode *mode,
 		const struct msm_resource_caps_info *res, u32 *num_lm);
+
+#ifdef CONFIG_DRM_MSM_MODULE
+int dsi_display_register(void);
+void dsi_display_unregister(void);
+int dp_display_init(void);
+void dp_display_cleanup(void);
+int sde_rsc_rpmh_register(void);
+int sde_rsc_register(void);
+void sde_rsc_unregister(void);
+int sde_wb_register(void);
+void sde_wb_unregister(void);
+int mdss_pll_driver_init(void);
+void mdss_pll_driver_deinit(void);
+int msm_notifier_register(void);
+void msm_notifier_unregister(void);
+#endif
 
 #endif /* __MSM_DRV_H__ */

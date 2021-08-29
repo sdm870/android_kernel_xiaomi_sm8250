@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _SDE_CONNECTOR_H_
@@ -158,15 +158,6 @@ struct sde_connector_ops {
 	 */
 	void (*enable_event)(struct drm_connector *connector,
 			uint32_t event_idx, bool enable, void *display);
-
-	/**
-	 * set_backlight - set backlight level
-	 * @connector: Pointer to drm connector structure
-	 * @display: Pointer to private display structure
-	 * @bl_lvel: Backlight level
-	 */
-	int (*set_backlight)(struct drm_connector *connector,
-			void *display, u32 bl_lvl);
 
 	/**
 	 * set_colorspace - set colorspace for connector
@@ -338,6 +329,21 @@ struct sde_connector_ops {
 	 */
 	int (*prepare_commit)(void *display,
 		struct msm_display_conn_params *params);
+
+	/**
+	 * set_idle_hint - gives hint to display whether display is idle
+	 * @display: Pointer to private display handle
+	 * @is_idle: true if display is idle, false otherwise
+	 */
+	void (*set_idle_hint)(void *display, bool is_idle);
+
+	/**
+	 * get_qsync_min_fps - Get qsync min fps from qsync-min-fps-list
+	 * @display: Pointer to private display structure
+	 * @mode_fps: Fps value in dfps list
+	 * Returns: Qsync min fps value on success
+	 */
+	int (*get_qsync_min_fps)(void *display, u32 mode_fps);
 };
 
 /**
@@ -379,21 +385,6 @@ struct sde_connector_dyn_hdr_metadata {
 	u8 dynamic_hdr_payload[SDE_CONNECTOR_DHDR_MEMPOOL_MAX_SIZE];
 	int dynamic_hdr_payload_size;
 	bool dynamic_hdr_update;
-};
-
-enum mi_dimlayer_type {
-	MI_DIMLAYER_NULL = 0x0,
-	MI_DIMLAYER_FOD_HBM_OVERLAY = 0x1,
-	MI_DIMLAYER_FOD_ICON = 0x2,
-	MI_DIMLAYER_AOD = 0x4,
-	MI_FOD_UNLOCK_SUCCESS = 0x8,
-	MI_DIMLAYER_MAX,
-};
-
-struct mi_dimlayer_state
-{
-	enum mi_dimlayer_type mi_dimlayer_type;
-	uint32_t current_backlight;
 };
 
 /**
@@ -440,7 +431,6 @@ struct mi_dimlayer_state
  * last_cmd_tx_sts: status of the last command transfer
  * @hdr_capable: external hdr support present
  * @core_clk_rate: MDP core clk rate used for dynamic HDR packet calculation
- * @mi_dimlayer_state: mi dimlayer state
  */
 struct sde_connector {
 	struct drm_connector base;
@@ -476,7 +466,6 @@ struct sde_connector {
 	spinlock_t event_lock;
 
 	struct backlight_device *bl_device;
-	struct sde_clone_cdev *cdev_clone;
 	struct delayed_work status_work;
 	u32 esd_status_interval;
 	bool panel_dead;
@@ -485,8 +474,6 @@ struct sde_connector {
 	bool bl_scale_dirty;
 	u32 bl_scale;
 	u32 bl_scale_sv;
-	u32 unset_bl_level;
-	bool allow_bl_update;
 
 	u32 qsync_mode;
 	bool qsync_updated;
@@ -495,9 +482,6 @@ struct sde_connector {
 
 	bool last_cmd_tx_sts;
 	bool hdr_capable;
-
-	struct mi_dimlayer_state mi_dimlayer_state;
-	u32 fod_frame_count;
 };
 
 /**
@@ -874,10 +858,12 @@ static inline bool sde_connector_needs_offset(struct drm_connector *connector)
  * @state: Pointer to drm_connector_state struct
  * @cfg: Pointer to pointer to dither cfg
  * @len: length of the dither data
+ * @idle_pc: flag to indicate idle_pc_restore happened
  * Returns: Zero on success
  */
 int sde_connector_get_dither_cfg(struct drm_connector *conn,
-		struct drm_connector_state *state, void **cfg, size_t *len);
+		struct drm_connector_state *state, void **cfg,
+		size_t *len, bool idle_pc);
 
 /**
  * sde_connector_set_blob_data - set connector blob property data
@@ -963,10 +949,18 @@ void sde_connector_destroy(struct drm_connector *connector);
 int sde_connector_event_notify(struct drm_connector *connector, uint32_t type,
 		uint32_t len, uint32_t val);
 /**
- * sde_connector_helper_bridge_enable - helper function for drm bridge enable
+ * sde_connector_helper_bridge_pre_enable - helper function for drm bridge
+ *                                          pre enable
  * @connector: Pointer to DRM connector object
  */
-void sde_connector_helper_bridge_enable(struct drm_connector *connector);
+void sde_connector_helper_bridge_pre_enable(struct drm_connector *connector);
+
+/**
+ * sde_connector_helper_bridge_post_enable - helper function for drm bridge
+ *                                           post enable
+ * @connector: Pointer to DRM connector object
+ */
+void sde_connector_helper_bridge_post_enable(struct drm_connector *connector);
 
 /**
  * sde_connector_get_panel_vfp - helper to get panel vfp
@@ -977,27 +971,18 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector);
  */
 int sde_connector_get_panel_vfp(struct drm_connector *connector,
 	struct drm_display_mode *mode);
+
+/**
+ * sde_connector_set_idle_hint - helper to give idle hint to connector
+ * @connector: pointer to drm connector
+ * @is_idle: true on idle, false on wake up from idle
+ */
+void sde_connector_set_idle_hint(struct drm_connector *connector, bool is_idle);
+
 /**
  * sde_connector_esd_status - helper function to check te status
  * @connector: Pointer to DRM connector object
  */
 int sde_connector_esd_status(struct drm_connector *connector);
-/**
- * sde_connector_hbm_ctl - mi function to control hbm
- * @connector: Pointer to DRM connector object
- * @op_code: hbm operation code
- */
-int sde_connector_hbm_ctl(struct drm_connector *connector, uint32_t op_code);
-
-int sde_connector_pre_hbm_ctl(struct drm_connector *connector);
-
-void sde_connector_mi_update_dimlayer_state(struct drm_connector *connector,
-	enum mi_dimlayer_type mi_dimlayer_type);
-
-void sde_connector_mi_get_current_backlight(struct drm_connector *connector, uint32_t *brightness);
-
-void sde_connector_mi_get_current_alpha(struct drm_connector *connector, uint32_t brightness, uint32_t *alpha);
-
-void sde_connector_fod_notify(struct drm_connector *connector);
 
 #endif /* _SDE_CONNECTOR_H_ */

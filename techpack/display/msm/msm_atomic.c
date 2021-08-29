@@ -21,7 +21,6 @@
 #include "msm_gem.h"
 #include "msm_kms.h"
 #include "sde_trace.h"
-#include "xiaomi_frame_stat.h"
 
 #define MULTIPLE_CONN_DETECTED(x) (x > 1)
 
@@ -33,6 +32,49 @@ struct msm_commit {
 	bool nonblock;
 	struct kthread_work commit_work;
 };
+
+static BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list);
+
+/**
+ * msm_drm_register_client - register a client notifier
+ * @nb: notifier block to callback on events
+ *
+ * This function registers a notifier callback function
+ * to msm_drm_notifier_list, which would be called when
+ * received unblank/power down event.
+ */
+int msm_drm_register_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&msm_drm_notifier_list,
+						nb);
+}
+EXPORT_SYMBOL(msm_drm_register_client);
+
+/**
+ * msm_drm_unregister_client - unregister a client notifier
+ * @nb: notifier block to callback on events
+ *
+ * This function unregisters the callback function from
+ * msm_drm_notifier_list.
+ */
+int msm_drm_unregister_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&msm_drm_notifier_list,
+						  nb);
+}
+EXPORT_SYMBOL(msm_drm_unregister_client);
+
+/**
+ * msm_drm_notifier_call_chain - notify clients of drm_events
+ * @val: event MSM_DRM_EARLY_EVENT_BLANK or MSM_DRM_EVENT_BLANK
+ * @v: notifier data, inculde display id and display blank
+ *     event(unblank or power down).
+ */
+int msm_drm_notifier_call_chain(unsigned long val, void *v)
+{
+	return blocking_notifier_call_chain(&msm_drm_notifier_list, val,
+					    v);
+}
 
 static inline bool _msm_seamless_for_crtc(struct drm_device *dev,
 					struct drm_atomic_state *state,
@@ -490,12 +532,6 @@ int msm_atomic_prepare_fb(struct drm_plane *plane,
 	return msm_framebuffer_prepare(new_state->fb, kms->aspace);
 }
 
-extern struct device *connector_kdev;
-void complete_time_generate_event(struct drm_device *dev)
-{
-	sysfs_notify(&connector_kdev->kobj, NULL, "complete_commit_time");
-}
-
 /* The (potentially) asynchronous part of the commit.  At this point
  * nothing can fail short of armageddon.
  */
@@ -538,18 +574,12 @@ static void complete_commit(struct msm_commit *c)
 
 	drm_atomic_state_put(state);
 
-	priv->complete_commit_time = ktime_get()/1000;
-
-	complete_time_generate_event(dev);
-
 	commit_destroy(c);
 }
 
 static void _msm_drm_commit_work_cb(struct kthread_work *work)
 {
 	struct msm_commit *commit = NULL;
-	ktime_t start, end;
-	s64 duration;
 
 	if (!work) {
 		DRM_ERROR("%s: Invalid commit work data!\n", __func__);
@@ -558,16 +588,9 @@ static void _msm_drm_commit_work_cb(struct kthread_work *work)
 
 	commit = container_of(work, struct msm_commit, commit_work);
 
-	start = ktime_get();
-	frame_stat_collector(0, COMMIT_START_TS);
-
 	SDE_ATRACE_BEGIN("complete_commit");
 	complete_commit(commit);
 	SDE_ATRACE_END("complete_commit");
-
-	end = ktime_get();
-	duration = ktime_to_ns(ktime_sub(end, start));
-	frame_stat_collector(duration, COMMIT_END_TS);
 }
 
 static struct msm_commit *commit_init(struct drm_atomic_state *state,

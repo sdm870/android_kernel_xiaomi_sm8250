@@ -2113,12 +2113,17 @@ static int fg_gen4_get_batt_profile(struct fg_dev *fg)
 		if ((chip->ds_romid[0] == 0x9F) && ((chip->ds_romid[5] & 0xF0) == 0xF0)
 				&& (chip->ds_romid[6] == 04) && !fg->profile_already_find) {
 			if ((chip->ds_page0[0] == 'C') || (chip->ds_page0[0] == 'V')) {
-				profile_node = of_batterydata_get_best_profile(batt_node,
+				if (chip->dt.k11a_batt_profile) {
+					profile_node = of_batterydata_get_best_profile(batt_node,
+							fg->batt_id_ohms / 1000, "K11A_GY_4520mah");
+				} else {
+					profile_node = of_batterydata_get_best_profile(batt_node,
 						fg->batt_id_ohms / 1000, "j2gybm4n_4780mah");
+				}
 			} else if ((chip->ds_page0[0] == 'N') || (chip->ds_page0[0] == 'A')) {
 				profile_node = of_batterydata_get_best_profile(batt_node,
 					fg->batt_id_ohms / 1000, "j2nvtbm4n_4780mah");
-			} else if ((chip->ds_page0[0] == 'U') || (chip->ds_page0[0] == 'G')) {
+			} else if (chip->ds_page0[0] == 'U') {
 				profile_node = of_batterydata_get_best_profile(batt_node,
 					fg->batt_id_ohms / 1000, "K11A_FMT_4520mah");
 			} else if ((chip->ds_page0[0] == 'S') || (chip->ds_page0[0] == 'X')) {
@@ -2153,9 +2158,9 @@ static int fg_gen4_get_batt_profile(struct fg_dev *fg)
 					profile_node = of_batterydata_get_best_profile(batt_node,
 						fg->batt_id_ohms / 1000, "j3ssun_5000mah");
 				} else if (chip->dt.k11a_batt_profile) {
-					pr_warn("verifty battery fail. use default profile K11A_GY_4520mah\n");
+					pr_warn("verifty battery fail. use default profile K11A_FMT_4520mah\n");
 					profile_node = of_batterydata_get_best_profile(batt_node,
-						fg->batt_id_ohms / 1000, "K11A_GY_4520mah");
+						fg->batt_id_ohms / 1000, "K11A_FMT_4520mah");
 				} else {
 					pr_warn("verifty battery fail. use default profile j11sun_4700mah\n");
 					profile_node = of_batterydata_get_best_profile(batt_node,

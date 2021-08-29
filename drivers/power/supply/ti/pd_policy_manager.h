@@ -118,7 +118,7 @@ enum pm_state {
 #define HIGH_VOL_THR_MV			4380
 #define CRITICAL_HIGH_VOL_THR_MV			4480
 
-#define IBUS_TARGET_COMP_MA			100
+#define IBUS_TARGET_COMP_MA			200
 #define HIGH_IBUS_LIMI_THR_MA			4000
 
 #define TAPER_DONE_FFC_MA			2400

@@ -19,6 +19,7 @@ struct mm_event_vmstat;
 	{ MM_READ_IO,	"read_io" },                                    \
 	{ MM_COMPACTION, "compaction" },                                \
 	{ MM_RECLAIM, "reclaim" },					\
+	{ MM_SWP_FAULT, "swp_flt" },					\
 	{ MM_KERN_ALLOC, "kern_alloc" },                                \
 	{ BLK_READ_SUBMIT_BIO, "blk_read_submit_bio" },                 \
 	{ UFS_READ_QUEUE_CMD, "ufs_read_queue_cmd" },                   \

@@ -27,6 +27,7 @@
 #include <linux/times.h>
 #include <linux/ptrace.h>
 #include <linux/gfp.h>
+#include <linux/sched/sysctl.h>
 
 #include <linux/uaccess.h>
 
@@ -290,7 +291,13 @@ COMPAT_SYSCALL_DEFINE3(sched_setaffinity, compat_pid_t, pid,
 	if (retval)
 		goto out;
 
-	retval = sched_setaffinity(pid, new_mask);
+	if (sched_lib_mask_force != 0 && is_sched_lib_based_app(pid)) {
+			cpumask_t forced_mask = { {sched_lib_mask_force} };
+			cpumask_copy(new_mask, &forced_mask);
+			retval = sched_setaffinity(pid, new_mask);
+		} else {
+			retval = sched_setaffinity(pid, new_mask);
+		}
 out:
 	free_cpumask_var(new_mask);
 	return retval;

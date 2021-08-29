@@ -19,6 +19,7 @@ files can be found in mm/swap.c.
 Currently, these files are in /proc/sys/vm:
 
 - admin_reserve_kbytes
+- anon_min_kbytes
 - block_dump
 - clean_low_kbytes
 - clean_min_kbytes
@@ -53,7 +54,6 @@ Currently, these files are in /proc/sys/vm:
 - nr_trim_pages         (only if CONFIG_MMU=n)
 - numa_zonelist_order
 - oom_dump_tasks
-- reap_mem_on_sigkill
 - oom_kill_allocating_task
 - overcommit_kbytes
 - overcommit_memory
@@ -67,7 +67,6 @@ Currently, these files are in /proc/sys/vm:
 - swappiness
 - user_reserve_kbytes
 - vfs_cache_pressure
-- watermark_boost_factor
 - watermark_scale_factor
 - zone_reclaim_mode
 - want_old_faultaround_pte
@@ -103,6 +102,23 @@ Changing this takes effect whenever an application requests memory.
 
 ==============================================================
 
+anon_min_kbytes
+
+This knob provides *hard* protection of anonymous pages. The anonymous pages
+on the current node won't be reclaimed under any conditions when their amount
+is below vm.anon_min_kbytes.
+
+This knob may be used to prevent excessive swap thrashing when anonymous
+memory is low (for example, when memory is going to be overfilled by
+compressed data of zram module).
+
+Setting this value too high (close to MemTotal) can result in inability to
+swap and can lead to early OOM under memory pressure.
+
+The default value is defined by CONFIG_ANON_MIN_KBYTES.
+
+==============================================================
+
 block_dump
 
 block_dump enables block I/O debugging when set to a nonzero value. More
@@ -112,13 +128,14 @@ information on block I/O debugging is in Documentation/laptops/laptop-mode.txt.
 
 clean_low_kbytes
 
-This knob provides *best-effort* protection of clean file pages. The clean file
-pages on the current node won't be reclaimed under memory pressure when their
-amount is below vm.clean_low_kbytes *unless* we threaten to OOM or have no
-free swap space or vm.swappiness=0.
+This knob provides *best-effort* protection of clean file pages. The file pages
+on the current node won't be reclaimed under memory pressure when the amount of
+clean file pages is below vm.clean_low_kbytes *unless* we threaten to OOM.
 
-Protection of clean file pages may be used to prevent thrashing and
-reducing I/O under low-memory conditions.
+Protection of clean file pages using this knob may be used when swapping is
+still possible to
+  - prevent disk I/O thrashing under memory pressure;
+  - improve performance in disk cache-bound tasks under memory pressure.
 
 Setting it to a high value may result in a early eviction of anonymous pages
 into the swap space by attempting to hold the protected amount of clean file
@@ -130,12 +147,14 @@ The default value is defined by CONFIG_CLEAN_LOW_KBYTES.
 
 clean_min_kbytes
 
-This knob provides *hard* protection of clean file pages. The clean file pages
-on the current node won't be reclaimed under memory pressure when their amount
-is below vm.clean_min_kbytes.
+This knob provides *hard* protection of clean file pages. The file pages on the
+current node won't be reclaimed under memory pressure when the amount of clean
+file pages is below vm.clean_min_kbytes.
 
-Hard protection of clean file pages may be used to avoid high latency and
-prevent livelock in near-OOM conditions.
+Hard protection of clean file pages using this knob may be used to
+  - prevent disk I/O thrashing under memory pressure even with no free swap space;
+  - improve performance in disk cache-bound tasks under memory pressure;
+  - avoid high latency and prevent livelock in near-OOM conditions.
 
 Setting it to a high value may result in a early out-of-memory condition due to
 the inability to reclaim the protected amount of clean file pages when other
@@ -694,24 +713,6 @@ The default value is 1 (enabled).
 
 ==============================================================
 
-reap_mem_on_sigkill
-
-This enables or disables the memory reaping for a SIGKILL received
-process and that the sending process must have the CAP_KILL capabilities.
-
-If this is set to 1, when a process receives SIGKILL from a process
-that has the capability, CAP_KILL, the process is added into the oom_reaper
-queue which can be picked up by the oom_reaper thread to reap the memory of
-that process. This reaps for the process which received SIGKILL through
-either sys_kill from user or kill_pid from kernel.
-
-If this is set to 0, we are not reaping memory of a SIGKILL, sent through
-either sys_kill from user or kill_pid from kernel, received process.
-
-The default value is 0 (disabled).
-
-==============================================================
-
 oom_kill_allocating_task
 
 This enables or disables killing the OOM-triggering task in
@@ -887,6 +888,14 @@ decrease the amount of swap.  A value of 0 instructs the kernel not to
 initiate swap until the amount of free and file-backed pages is less
 than the high water mark in a zone.
 
+This knob has no effect if the amount of clean file pages on the current
+node is below vm.clean_low_kbytes or vm.clean_min_kbytes. In this case,
+only anonymous pages can be reclaimed.
+
+If the number of anonymous pages on the current node is below
+vm.anon_min_kbytes, then only file pages can be reclaimed with
+any vm.swappiness value.
+
 The default value is 60.
 
 ==============================================================
@@ -927,26 +936,6 @@ Increasing vfs_cache_pressure significantly beyond 100 may have negative
 performance impact. Reclaim code needs to take various locks to find freeable
 directory and inode objects. With vfs_cache_pressure=1000, it will look for
 ten times more freeable objects than there are.
-
-=============================================================
-
-watermark_boost_factor:
-
-This factor controls the level of reclaim when memory is being fragmented.
-It defines the percentage of the high watermark of a zone that will be
-reclaimed if pages of different mobility are being mixed within pageblocks.
-The intent is that compaction has less work to do in the future and to
-increase the success rate of future high-order allocations such as SLUB
-allocations, THP and hugetlbfs pages.
-
-To make it sensible with respect to the watermark_scale_factor parameter,
-the unit is in fractions of 10,000. The default value of 15,000 means
-that up to 150% of the high watermark will be reclaimed in the event of
-a pageblock being mixed due to fragmentation. The level of reclaim is
-determined by the number of fragmentation events that occurred in the
-recent past. If this value is smaller than a pageblock then a pageblocks
-worth of pages will be reclaimed (e.g.  2MB on 64-bit x86). A boost factor
-of 0 will disable the feature.
 
 =============================================================
 

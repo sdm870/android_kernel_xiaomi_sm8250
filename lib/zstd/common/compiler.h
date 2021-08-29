@@ -108,8 +108,9 @@
 }
 
 /* vectorization
- * older GCC (pre gcc-4.3 picked as the cutoff) uses a different syntax */
-#if !defined(__INTEL_COMPILER) && !defined(__clang__) && defined(__GNUC__)
+ * older GCC (pre gcc-4.3 picked as the cutoff) uses a different syntax,
+ * and some compilers, like Intel ICC and MCST LCC, do not support it at all. */
+#if !defined(__INTEL_COMPILER) && !defined(__clang__) && defined(__GNUC__) && !defined(__LCC__)
 #  if (__GNUC__ == 4 && __GNUC_MINOR__ > 3) || (__GNUC__ >= 5)
 #    define DONT_VECTORIZE __attribute__((optimize("no-tree-vectorize")))
 #  else
@@ -131,6 +132,8 @@
 
 /*Like DYNAMIC_BMI2 but for compile time determination of BMI2 support*/
 
+
+/* compile time determination of SIMD support */
 
 /* compat. with non-clang compilers */
 #ifndef __has_builtin

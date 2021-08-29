@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -11,6 +11,7 @@
 #include <linux/sched.h>
 
 #include <drm/drm_panel.h>
+#include "msm_drv.h"
 #include "sde_dbg.h"
 
 struct msm_display_fps_info {
@@ -51,10 +52,11 @@ static int msm_notifier_fps_chg_callback(struct notifier_block *nb,
 	/*
 	 * Get ceiling of fps from notifier data to pass to scheduler.
 	 * Default will be FPS60 and sent to scheduler during suspend.
-	 * Currently scheduler expects FPS120 for any fps over 90.
 	 */
 	fps = notifier_data->refresh_rate;
-	if (fps > FPS90)
+	if (fps > FPS120)
+		sched_fps = FPS144;
+	else if (fps > FPS90)
 		sched_fps = FPS120;
 	else if (fps > FPS60)
 		sched_fps = FPS90;
@@ -129,7 +131,6 @@ static int msm_notifier_probe(struct platform_device *pdev)
 
 	active_displays = devm_kzalloc(&pdev->dev,
 				sizeof(*active_displays), GFP_KERNEL);
-
 	if (!active_displays) {
 		ret = -ENOMEM;
 		goto end;
@@ -180,36 +181,37 @@ fail:
 	devm_kfree(&pdev->dev, active_displays);
 end:
 	devm_kfree(&pdev->dev, info);
-
 	return ret;
 }
 
-static const struct of_device_id dt_match[] = {
+static const struct of_device_id dt_match_msm_notifier[] = {
 	{ .compatible = "qcom,msm-notifier"},
 	{},
 };
 
-MODULE_DEVICE_TABLE(of, dt_match);
+MODULE_DEVICE_TABLE(of, dt_match_msm_notifier);
 
 static struct platform_driver msm_notifier_platform_driver = {
 	.probe     = msm_notifier_probe,
 	.remove    = msm_notifier_remove,
 	.driver     = {
 		.name   = "msm_notifier",
-		.of_match_table = dt_match,
+		.of_match_table = dt_match_msm_notifier,
 		.suppress_bind_attrs = true,
 	},
 };
 
-static int __init msm_notifier_register(void)
+int __init msm_notifier_register(void)
 {
 	return platform_driver_register(&msm_notifier_platform_driver);
 }
 
-static void __exit msm_notifier_unregister(void)
+void __exit msm_notifier_unregister(void)
 {
 	platform_driver_unregister(&msm_notifier_platform_driver);
 }
 
+#ifndef CONFIG_DRM_MSM_MODULE
 late_initcall(msm_notifier_register);
 module_exit(msm_notifier_unregister);
+#endif
