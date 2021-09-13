@@ -31,7 +31,7 @@ config QTI_VIRTUAL_SENSOR
 	  determine the virtual sensor temperature.
 
 config QTI_QMI_SENSOR
-	bool "QTI QMI sensor driver"
+	tristate "QTI QMI sensor driver"
 	depends on QCOM_QMI_HELPERS && THERMAL_OF
 	help
 	   This enables to list the QTI remote subsystem temperature sensors.
@@ -40,7 +40,7 @@ config QTI_QMI_SENSOR
 	   framework when the threshold is reached.
 
 config QTI_BCL_PMIC5
-	bool "BCL driver for BCL peripherals in PMIC5"
+	tristate "BCL driver for BCL peripherals in PMIC5"
 	depends on SPMI && THERMAL_OF
 	help
 	  Say Y here to enable this BCL driver for PMIC5. This driver
@@ -51,7 +51,7 @@ config QTI_BCL_PMIC5
 	  reached.
 
 config QTI_BCL_SOC_DRIVER
-	bool "QTI Battery state of charge sensor driver"
+	tristate "QTI Battery state of charge sensor driver"
 	depends on THERMAL_OF
 	help
 	  This driver registers battery state of charge as a sensor with
@@ -61,7 +61,7 @@ config QTI_BCL_SOC_DRIVER
 	  If you want this support, you should say Y here.
 
 config QTI_QMI_COOLING_DEVICE
-	bool "QTI QMI cooling devices"
+	tristate "QTI QMI cooling devices"
 	depends on QCOM_QMI_HELPERS && THERMAL_OF
 	help
 	   This enables the QTI remote subsystem cooling devices. These cooling
@@ -72,7 +72,7 @@ config QTI_QMI_COOLING_DEVICE
 	   using QTI QMI interface.
 
 config QTI_THERMAL_LIMITS_DCVS
-	bool "QTI LMH DCVS Driver"
+	tristate "QTI LMH DCVS Driver"
 	depends on THERMAL_OF
 	depends on CPU_THERMAL
 	help
@@ -83,7 +83,7 @@ config QTI_THERMAL_LIMITS_DCVS
 	  hardware without s/w intervention.
 
 config QTI_AOP_REG_COOLING_DEVICE
-	bool "QTI AOP Regulator cooling device"
+	tristate "QTI AOP Regulator cooling device"
 	depends on THERMAL_OF && MSM_QMP
 	help
 	  This enables the AOP based Regulator cooling device. This cooling
@@ -114,7 +114,7 @@ config MSM_BCL_PERIPHERAL_CTL
 	  reached.
 
 config QTI_CPU_ISOLATE_COOLING_DEVICE
-	bool "QTI CPU Isolate cooling devices"
+	tristate "QTI CPU Isolate cooling devices"
 	depends on THERMAL_OF
 	help
 	   This enables the QTI CPU Isolation cooling devices. These cooling

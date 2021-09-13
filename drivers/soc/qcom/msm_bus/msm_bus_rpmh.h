@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
- * Copyright (C) 2021 XiaoMi, Inc.
  */
 
 #ifndef _ARCH_ARM_MACH_MSM_BUS_ADHOC_H
@@ -254,6 +253,19 @@ extern int msm_bus_of_get_static_rules(struct platform_device *pdev,
 extern int msm_rules_update_path(struct list_head *input_list,
 				struct list_head *output_list);
 extern void print_all_rules(void);
+
+static inline int msm_bus_device_match_adhoc(struct device *dev, void *id)
+{
+	int ret = 0;
+	struct msm_bus_node_device_type *bnode = to_msm_bus_node(dev);
+
+	if (bnode)
+		ret = (bnode->node_info->id == *(unsigned int *)id);
+	else
+		ret = 0;
+
+	return ret;
+}
 
 #define mbus_rpmh_rt_mutex_lock(lock)				\
 do {	\

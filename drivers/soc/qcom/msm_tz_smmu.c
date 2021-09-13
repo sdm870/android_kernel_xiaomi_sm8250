@@ -5,6 +5,7 @@
 
 #include <linux/kernel.h>
 #include <linux/device.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <soc/qcom/scm.h>
 #include <soc/qcom/msm_tz_smmu.h>
@@ -65,6 +66,7 @@ enum tz_smmu_device_id msm_dev_to_device_id(struct device *dev)
 
 	return TZ_DEVICE_MAX;
 }
+EXPORT_SYMBOL_GPL(msm_dev_to_device_id);
 
 static int __msm_tz_smmu_atos(struct device *dev, int cb_num, int operation)
 {
@@ -121,3 +123,7 @@ int msm_tz_set_cb_format(enum tz_smmu_device_id sec_id, int cbndx)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(msm_tz_set_cb_format);
+
+MODULE_LICENSE("GPL v2");
+MODULE_DESCRIPTION("MSM TZ SMMU");

@@ -72,9 +72,6 @@ function update_perf_config() {
     -d SOFTLOCKUP_DETECTOR \
     -d MHI_DEBUG \
     -d NL80211_TESTMODE \
-    -d CMDLINE_EXTEND \
-    -d CMDLINE \
-    -d MTD \
 
   (cd ${OUT_DIR} && \
     make O=${OUT_DIR} CLANG_TRIPLE=${CLANG_TRIPLE} CROSS_COMPILE=${CROSS_COMPILE} "${TOOL_ARGS[@]}" ${MAKE_ARGS} olddefconfig)

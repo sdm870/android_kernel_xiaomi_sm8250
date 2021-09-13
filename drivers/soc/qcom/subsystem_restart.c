@@ -28,12 +28,14 @@
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/subsystem_notif.h>
 #include <soc/qcom/sysmon.h>
-#include <trace/events/trace_msm_pil_event.h>
 #include <linux/soc/qcom/smem_state.h>
 #include <linux/of_irq.h>
 #include <linux/of.h>
 #include <asm/current.h>
 #include <linux/timer.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/trace_msm_pil_event.h>
 
 #include "peripheral-loader.h"
 
@@ -44,6 +46,10 @@ module_param(disable_restart_work, uint, 0644);
 
 static int enable_debug;
 module_param(enable_debug, int, 0644);
+
+void *pil_ipc_log;
+EXPORT_SYMBOL_GPL(pil_ipc_log);
+EXPORT_TRACEPOINT_SYMBOL_GPL(pil_event);
 
 /* The maximum shutdown timeout is the product of MAX_LOOPS and DELAY_MS. */
 #define SHUTDOWN_ACK_MAX_LOOPS	100
@@ -205,6 +211,15 @@ struct subsys_device {
 	int notif_state;
 	struct list_head list;
 };
+
+
+static bool timeouts_disabled;
+
+void disable_pil_timeouts(void)
+{
+	timeouts_disabled = true;
+}
+EXPORT_SYMBOL_GPL(disable_pil_timeouts);
 
 static struct subsys_device *to_subsys(struct device *d)
 {
@@ -747,7 +762,7 @@ static int wait_for_err_ready(struct subsys_device *subsys)
 	 * don't return.
 	 */
 	if ((subsys->desc->generic_irq <= 0 && !subsys->desc->err_ready_irq) ||
-				enable_debug == 1 || is_timeout_disabled())
+				enable_debug == 1 || timeouts_disabled)
 		return 0;
 
 	ret = wait_for_completion_timeout(&subsys->err_ready,
@@ -1419,6 +1434,7 @@ void notify_proxy_vote(struct device *device)
 	if (dev)
 		notify_each_subsys_device(&dev, 1, SUBSYS_PROXY_VOTE, NULL);
 }
+EXPORT_SYMBOL_GPL(notify_proxy_vote);
 
 void notify_proxy_unvote(struct device *device)
 {
@@ -1427,6 +1443,7 @@ void notify_proxy_unvote(struct device *device)
 	if (dev)
 		notify_each_subsys_device(&dev, 1, SUBSYS_PROXY_UNVOTE, NULL);
 }
+EXPORT_SYMBOL_GPL(notify_proxy_unvote);
 
 void notify_before_auth_and_reset(struct device *device)
 {
@@ -1436,7 +1453,7 @@ void notify_before_auth_and_reset(struct device *device)
 		notify_each_subsys_device(&dev, 1,
 			SUBSYS_BEFORE_AUTH_AND_RESET, NULL);
 }
-
+EXPORT_SYMBOL_GPL(notify_before_auth_and_reset);
 
 static int subsys_device_open(struct inode *inode, struct file *file)
 {

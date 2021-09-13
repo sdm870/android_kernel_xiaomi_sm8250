@@ -3,7 +3,6 @@
  * fs/f2fs/super.c
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
- * Copyright (C) 2021 XiaoMi, Inc.
  *             http://www.samsung.com/
  */
 #include <linux/module.h>
@@ -1206,7 +1205,6 @@ static struct inode *f2fs_alloc_inode(struct super_block *sb)
 	INIT_LIST_HEAD(&fi->gdirty_list);
 	INIT_LIST_HEAD(&fi->inmem_ilist);
 	INIT_LIST_HEAD(&fi->inmem_pages);
-	INIT_LIST_HEAD(&fi->xattr_dirty_list);
 	mutex_init(&fi->inmem_lock);
 	init_rwsem(&fi->i_gc_rwsem[READ]);
 	init_rwsem(&fi->i_gc_rwsem[WRITE]);
@@ -1915,6 +1913,7 @@ static void default_options(struct f2fs_sb_info *sbi)
 	set_opt(sbi, EXTENT_CACHE);
 	set_opt(sbi, NOHEAP);
 	clear_opt(sbi, DISABLE_CHECKPOINT);
+	set_opt(sbi, MERGE_CHECKPOINT);
 	F2FS_OPTION(sbi).unusable_cap = 0;
 	sbi->sb->s_flags |= SB_LAZYTIME;
 	set_opt(sbi, FLUSH_MERGE);
@@ -3042,12 +3041,6 @@ static int sanity_check_raw_super(struct f2fs_sb_info *sbi,
 	size_t crc_offset = 0;
 	__u32 crc = 0;
 
-	if (le32_to_cpu(raw_super->magic) != F2FS_SUPER_MAGIC) {
-		f2fs_info(sbi, "Magic Mismatch, valid(0x%x) - read(0x%x)",
-			  F2FS_SUPER_MAGIC, le32_to_cpu(raw_super->magic));
-		return -EINVAL;
-	}
-
 	/* Check checksum_offset and crc in superblock */
 	if (__F2FS_HAS_FEATURE(raw_super, F2FS_FEATURE_SB_CHKSUM)) {
 		crc_offset = le32_to_cpu(raw_super->checksum_offset);
@@ -3966,9 +3959,6 @@ try_onemore:
 		spin_lock_init(&sbi->inode_lock[i]);
 	}
 	mutex_init(&sbi->flush_lock);
-
-	INIT_LIST_HEAD(&sbi->xattr_set_dir_ilist);
-	spin_lock_init(&sbi->xattr_set_dir_ilist_lock);
 
 	f2fs_init_extent_cache_info(sbi);
 

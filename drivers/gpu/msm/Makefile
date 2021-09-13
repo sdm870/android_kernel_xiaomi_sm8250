@@ -54,8 +54,6 @@ msm_adreno-$(CONFIG_DEBUG_FS) += adreno_debugfs.o adreno_profile.o
 msm_adreno-$(CONFIG_COMPAT) += adreno_compat.o
 msm_adreno-$(CONFIG_CORESIGHT_ADRENO) += adreno_coresight.o
 
-msm_kgsl_core-objs = $(msm_kgsl_core-y)
-msm_adreno-objs = $(msm_adreno-y)
+msm_adreno-objs = $(msm_adreno-y) $(msm_kgsl_core-y)
 
-obj-$(CONFIG_QCOM_KGSL) += msm_kgsl_core.o
 obj-$(CONFIG_QCOM_KGSL) += msm_adreno.o

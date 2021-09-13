@@ -8,6 +8,7 @@
 #include <linux/init.h>
 #include <linux/export.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/err.h>
 #include <linux/elf.h>
 #include <linux/errno.h>
@@ -585,3 +586,5 @@ static int __init msm_minidump_init(void)
 	return 0;
 }
 subsys_initcall(msm_minidump_init)
+
+MODULE_LICENSE("GPL v2");

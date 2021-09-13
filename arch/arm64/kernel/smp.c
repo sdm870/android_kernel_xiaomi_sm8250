@@ -22,6 +22,7 @@
 #include <linux/arm_sdei.h>
 #include <linux/delay.h>
 #include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/hotplug.h>
@@ -64,6 +65,7 @@
 #include <asm/system_misc.h>
 #include <soc/qcom/minidump.h>
 
+#include <soc/qcom/scm.h>
 #include <soc/qcom/lpm_levels.h>
 
 #define CREATE_TRACE_POINTS
@@ -412,12 +414,21 @@ static void __init hyp_mode_check(void)
 		pr_info("CPU: All CPU(s) started at EL1\n");
 }
 
+#if defined(CONFIG_QCOM_SCM_MODULE) && \
+	defined(CONFIG_QCOM_QHEE_ENABLE_MEM_PROTECTION)
+int __init __weak scm_enable_mem_protection(void)
+{
+	return 0;
+}
+#endif
+
 void __init smp_cpus_done(unsigned int max_cpus)
 {
 	pr_info("SMP: Total of %d processors activated.\n", num_online_cpus());
 	setup_cpu_features();
 	hyp_mode_check();
 	apply_alternatives_all();
+	scm_enable_mem_protection();
 	mark_linear_text_alias_ro();
 }
 
@@ -855,7 +866,8 @@ static void ipi_cpu_stop(unsigned int cpu, struct pt_regs *regs)
 		pr_crit("CPU%u: stopping\n", cpu);
 		__show_regs(regs);
 		dump_stack();
-		dump_stack_minidump(regs->sp);
+		if (vendor_panic_cb)
+			vendor_panic_cb(regs->sp);
 		raw_spin_unlock(&stop_lock);
 	}
 

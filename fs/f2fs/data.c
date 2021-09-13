@@ -286,9 +286,10 @@ static void f2fs_read_end_io(struct bio *bio)
 
 	if (first_page != NULL &&
 		__read_io_type(first_page) == F2FS_RD_DATA) {
-		trace_android_fs_dataread_end(first_page->mapping->host,
-						page_offset(first_page),
-						bio->bi_iter.bi_size);
+		trace_android_fs_dataread_end(
+					page_file_mapping(first_page)->host,
+					page_file_offset(first_page),
+					bio->bi_iter.bi_size);
 	}
 
 	if (ctx && (ctx->enabled_steps & (STEP_DECRYPT | STEP_DECOMPRESS))) {
@@ -517,12 +518,12 @@ static void __f2fs_submit_read_bio(struct f2fs_sb_info *sbi,
 			char *path, pathbuf[MAX_TRACE_PATHBUF_LEN];
 
 			path = android_fstrace_get_pathname(pathbuf,
-						MAX_TRACE_PATHBUF_LEN,
-						first_page->mapping->host);
+					MAX_TRACE_PATHBUF_LEN,
+					page_file_mapping(first_page)->host);
 
 			trace_android_fs_dataread_start(
-				first_page->mapping->host,
-				page_offset(first_page),
+				page_file_mapping(first_page)->host,
+				page_file_offset(first_page),
 				bio->bi_iter.bi_size,
 				current->pid,
 				path,
@@ -1527,6 +1528,7 @@ int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
 		if (map->m_next_extent)
 			*map->m_next_extent = pgofs + map->m_len;
 
+		/* for hardware encryption, but to avoid potential issue in future */
 		if (flag == F2FS_GET_BLOCK_DIO)
 			f2fs_wait_on_block_writeback_range(inode,
 						map->m_pblk, map->m_len);
@@ -1691,6 +1693,7 @@ skip:
 
 sync_out:
 
+	/* for hardware encryption, but to avoid potential issue in future */
 	if (flag == F2FS_GET_BLOCK_DIO && map->m_flags & F2FS_MAP_MAPPED)
 		f2fs_wait_on_block_writeback_range(inode,
 						map->m_pblk, map->m_len);
@@ -2585,6 +2588,8 @@ bool f2fs_should_update_outplace(struct inode *inode, struct f2fs_io_info *fio)
 	if (IS_NOQUOTA(inode))
 		return true;
 	if (f2fs_is_atomic_file(inode))
+		return true;
+	if (is_sbi_flag_set(sbi, SBI_NEED_FSCK))
 		return true;
 
 	/* swap file is migrating in aligned write mode */

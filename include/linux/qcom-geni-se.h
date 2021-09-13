@@ -819,7 +819,6 @@ int geni_se_iommu_free_buf(struct device *wrapper_dev, dma_addr_t *iova,
  */
 void geni_se_dump_dbg_regs(struct se_geni_rsc *rsc, void __iomem *base,
 				void *ipc);
-
 #else
 static inline unsigned int geni_read_reg_nolog(void __iomem *base, int offset)
 {

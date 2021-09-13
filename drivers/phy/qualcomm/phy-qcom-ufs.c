@@ -682,6 +682,7 @@ int ufs_qcom_phy_start_serdes(struct phy *generic_phy)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(ufs_qcom_phy_start_serdes);
 
 int ufs_qcom_phy_set_tx_lane_enable(struct phy *generic_phy, u32 tx_lanes)
 {
@@ -705,6 +706,7 @@ int ufs_qcom_phy_ctrl_rx_linecfg(struct phy *generic_phy, bool ctrl)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(ufs_qcom_phy_ctrl_rx_linecfg);
 
 void ufs_qcom_phy_save_controller_version(struct phy *generic_phy,
 					  u8 major, u16 minor, u16 step)
@@ -761,6 +763,7 @@ int ufs_qcom_phy_is_pcs_ready(struct phy *generic_phy)
 	return ufs_qcom_phy->phy_spec_ops->
 			is_physical_coding_sublayer_ready(ufs_qcom_phy);
 }
+EXPORT_SYMBOL_GPL(ufs_qcom_phy_is_pcs_ready);
 
 int ufs_qcom_phy_power_on(struct phy *generic_phy)
 {
@@ -903,3 +906,5 @@ MODULE_AUTHOR("Yaniv Gardi <ygardi@codeaurora.org>");
 MODULE_AUTHOR("Vivek Gautam <vivek.gautam@codeaurora.org>");
 MODULE_DESCRIPTION("Universal Flash Storage (UFS) QCOM PHY");
 MODULE_LICENSE("GPL v2");
+MODULE_SOFTDEP("pre: watchdog_v2");
+MODULE_SOFTDEP("pre: early_random");

@@ -701,3 +701,5 @@ do_elf_ramdump(void *handle, struct ramdump_segment *segments, int nsegments)
 				rd_dev->complete_ramdump);
 }
 EXPORT_SYMBOL(do_elf_ramdump);
+
+MODULE_LICENSE("GPL v2");

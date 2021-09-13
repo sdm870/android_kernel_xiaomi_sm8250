@@ -1984,12 +1984,21 @@ static const struct of_device_id fabric_match[] = {
 	{}
 };
 
+void msm_bus_device_sync_state(struct device *dev __attribute__((__unused__)))
+{
+	commit_late_init_data(true);
+	MSM_BUS_ERR("msm_bus_late_init: Remove handoff bw requests\n");
+	init_time = false;
+	commit_late_init_data(false);
+}
+
 static struct platform_driver msm_bus_device_driver = {
 	.probe = msm_bus_device_probe,
 	.remove = msm_bus_device_remove,
 	.driver = {
 		.name = "msm_bus_device",
 		.of_match_table = fabric_match,
+		.sync_state = msm_bus_device_sync_state,
 	},
 };
 
@@ -2023,6 +2032,12 @@ int __init msm_bus_device_init_driver(void)
 {
 	int rc;
 
+#ifdef MODULE
+	rc = msm_bus_rsc_init_driver();
+	if (rc)
+		return rc;
+#endif
+
 	MSM_BUS_ERR("msm_bus_fabric_rpmh_init_driver\n");
 	rc =  platform_driver_register(&msm_bus_device_driver);
 
@@ -2033,13 +2048,10 @@ int __init msm_bus_device_init_driver(void)
 	return platform_driver_register(&msm_bus_rules_driver);
 }
 
-int __init msm_bus_device_late_init(void)
-{
-	commit_late_init_data(true);
-	MSM_BUS_ERR("msm_bus_late_init: Remove handoff bw requests\n");
-	init_time = false;
-	return commit_late_init_data(false);
-}
+#ifndef MODULE
 core_initcall(msm_bus_rsc_init_driver);
+#endif
 subsys_initcall(msm_bus_device_init_driver);
-late_initcall_sync(msm_bus_device_late_init);
+
+MODULE_DESCRIPTION("MSM Bus Scaling driver");
+MODULE_LICENSE("GPL v2");

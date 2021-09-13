@@ -14,8 +14,6 @@ struct device;
 struct module;
 struct pil_priv;
 
-extern void *pil_ipc_log;
-
 #define pil_ipc(__msg, ...) \
 do { \
 	if (pil_ipc_log) \
@@ -114,7 +112,7 @@ struct pil_reset_ops {
 	int (*shutdown)(struct pil_desc *pil);
 };
 
-#ifdef CONFIG_MSM_PIL
+#if IS_ENABLED(CONFIG_MSM_PIL)
 extern int pil_desc_init(struct pil_desc *desc);
 extern int pil_boot(struct pil_desc *desc);
 extern void pil_shutdown(struct pil_desc *desc);

@@ -18,6 +18,7 @@
 #include <linux/mm.h>
 #include <linux/sched/task.h>
 #include <linux/vmalloc.h>
+#include <linux/printk.h>
 
 static bool is_vmap_stack __read_mostly;
 
@@ -41,22 +42,18 @@ static DEFINE_PER_CPU_SHARED_ALIGNED(struct md_stack_cpu_data, md_stack_data);
 
 static void __init register_log_buf(void)
 {
-	char *log_bufp;
-	uint32_t log_buf_len;
+	char *log_buf = log_buf_addr_get();
 	struct md_region md_entry;
 
-	log_bufp = log_buf_addr_get();
-	log_buf_len = log_buf_len_get();
-
-	if (!log_bufp || !log_buf_len) {
-		pr_err("Unable to locate log_buf!\n");
+	if (!log_buf) {
+		pr_err("Unable to find log_buf details!\n");
 		return;
 	}
 	/*Register logbuf to minidump, first idx would be from bss section */
 	strlcpy(md_entry.name, "KLOGBUF", sizeof(md_entry.name));
-	md_entry.virt_addr = (uintptr_t) log_bufp;
-	md_entry.phys_addr = virt_to_phys(log_bufp);
-	md_entry.size = log_buf_len;
+	md_entry.virt_addr = (uintptr_t) log_buf;
+	md_entry.phys_addr = virt_to_phys(log_buf);
+	md_entry.size = log_buf_len_get();
 	md_entry.id = MINIDUMP_DEFAULT_ID;
 	if (msm_minidump_add_region(&md_entry) < 0)
 		pr_err("Failed to add logbuf in Minidump\n");
@@ -365,6 +362,9 @@ static int __init msm_minidump_log_init(void)
 	register_current_stack();
 #endif
 	register_log_buf();
+	vendor_panic_cb = dump_stack_minidump;
 	return 0;
 }
-subsys_initcall(msm_minidump_log_init);
+late_initcall(msm_minidump_log_init);
+
+MODULE_LICENSE("GPL v2");

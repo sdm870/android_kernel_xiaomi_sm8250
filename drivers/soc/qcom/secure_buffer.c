@@ -7,6 +7,7 @@
 #include <linux/highmem.h>
 #include <linux/kernel.h>
 #include <linux/kref.h>
+#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
@@ -151,6 +152,7 @@ int msm_secure_table(struct sg_table *table)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(msm_secure_table);
 
 int msm_unsecure_table(struct sg_table *table)
 {
@@ -162,6 +164,7 @@ int msm_unsecure_table(struct sg_table *table)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(msm_unsecure_table);
 
 static struct dest_vm_and_perm_info *
 populate_dest_info(int *dest_vmids, int nelements, int *dest_perms,
@@ -364,6 +367,7 @@ int try_hyp_assign_table(struct sg_table *table,
 	return __hyp_assign_table(table, source_vm_list, source_nelems,
 				  dest_vmids, dest_perms, dest_nelems, true);
 }
+EXPORT_SYMBOL_GPL(try_hyp_assign_table);
 
 int hyp_assign_phys(phys_addr_t addr, u64 size, u32 *source_vm_list,
 			int source_nelems, int *dest_vmids,
@@ -444,6 +448,7 @@ bool msm_secure_v2_is_supported(void)
 	return (scm_get_feat_version(FEATURE_ID_CP) >=
 			MAKE_CP_VERSION(1, 1, 0));
 }
+EXPORT_SYMBOL_GPL(msm_secure_v2_is_supported);
 
 u32 msm_secure_get_vmid_perms(u32 vmid)
 {
@@ -455,3 +460,6 @@ u32 msm_secure_get_vmid_perms(u32 vmid)
 		return PERM_READ | PERM_WRITE;
 }
 EXPORT_SYMBOL(msm_secure_get_vmid_perms);
+
+MODULE_LICENSE("GPL v2");
+MODULE_DESCRIPTION("Secure Buffer");

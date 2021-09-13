@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <asm/cacheflush.h>
@@ -63,21 +63,12 @@ _kgsl_pool_add_page(struct kgsl_page_pool *pool, struct page *p)
 {
 	kgsl_zero_page(p, pool->pool_order);
 
-	/*
-	 * Sanity check to make sure we don't re-pool a page that
-	 * somebody else has a reference to.
-	 */
-	if (WARN_ON(unlikely(page_count(p) > 1))) {
-		__free_pages(p, pool->pool_order);
-		return;
-	}
-
 	spin_lock(&pool->list_lock);
 	list_add_tail(&p->lru, &pool->page_list);
 	pool->page_count++;
 	spin_unlock(&pool->list_lock);
 	mod_node_page_state(page_pgdat(p), NR_KERNEL_MISC_RECLAIMABLE,
-			    (1 << pool->pool_order));
+				(1 << pool->pool_order));
 }
 
 /* Returns a page from specified pool */
@@ -87,20 +78,16 @@ _kgsl_pool_get_page(struct kgsl_page_pool *pool)
 	struct page *p = NULL;
 
 	spin_lock(&pool->list_lock);
-
-	p = list_first_entry_or_null(&pool->page_list, struct page, lru);
-	if (p == NULL) {
-		spin_unlock(&pool->list_lock);
-		return NULL;
+	if (pool->page_count) {
+		p = list_first_entry(&pool->page_list, struct page, lru);
+		pool->page_count--;
+		list_del(&p->lru);
 	}
-	pool->page_count--;
-	list_del(&p->lru);
 	spin_unlock(&pool->list_lock);
 
 	if (p != NULL)
-		mod_node_page_state(page_pgdat(p),
-				    NR_KERNEL_MISC_RECLAIMABLE,
-				    -(1 << pool->pool_order));
+		mod_node_page_state(page_pgdat(p), NR_KERNEL_MISC_RECLAIMABLE,
+				-(1 << pool->pool_order));
 
 	return p;
 }
@@ -205,7 +192,9 @@ kgsl_pool_reduce(unsigned int target_pages, bool exit)
 		if (!pool->allocation_allowed && !exit)
 			continue;
 
-		nr_removed = total_pages - target_pages - pcount;
+		total_pages -= pcount;
+
+		nr_removed = total_pages - target_pages;
 		if (nr_removed <= 0)
 			return pcount;
 

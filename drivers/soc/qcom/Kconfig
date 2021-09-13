@@ -72,7 +72,7 @@ config QCOM_CPUSS_DUMP
 	  If unsure, say N
 
 config QCOM_RUN_QUEUE_STATS
-       bool "Enable collection and exporting of QTI Run Queue stats to userspace"
+       tristate "Enable collection and exporting of QTI Run Queue stats to userspace"
        help
         This option enables the driver to periodically collecting the statistics
         of kernel run queue information and calculate the load of the system.
@@ -188,7 +188,7 @@ config QCOM_PM
 	  low power modes.
 
 config QCOM_QMI_HELPERS
-	bool "QTI QMI Helpers"
+	tristate "QTI QMI Helpers"
 	depends on QRTR
 	help
 	  Helper library for handling QMI encoded messages.  QMI encoded
@@ -291,7 +291,7 @@ config MSM_L2_SPM
           on supported chipsets.
 
 config QCOM_SCM
-	bool "Secure Channel Manager (SCM) support"
+	tristate "Secure Channel Manager (SCM) support"
 	default n
 	help
 	  Say y here to enable Secure Channel Mananger(SCM) support for SoC.
@@ -300,7 +300,7 @@ config QCOM_SCM
 	  SCM driver provides the support for atomic scm calls also.
 
 config QCOM_EARLY_RANDOM
-	bool "Initialize random pool very early"
+	tristate "Initialize random pool very early"
 	help
 	 The standard random pool may not initialize until late in the boot
 	 process which means that any calls to get random numbers before then
@@ -325,7 +325,7 @@ config MSM_DEBUG_LAR_UNLOCK
 	  location.
 
 config QCOM_SMEM_STATE
-	bool
+	tristate
 
 config QCOM_SMP2P
 	tristate "Qualcomm Shared Memory Point to Point support"
@@ -399,7 +399,7 @@ config PANIC_ON_SSR_NOTIF_TIMEOUT
 	  This is a debugging feature.
 
 config QCOM_SECURE_BUFFER
-	bool "Helper functions for securing buffers through TZ"
+	tristate "Helper functions for securing buffers through TZ"
 	help
 	 Say 'Y' here for targets that need to call into TZ to secure
 	 memory buffers. This ensures that only the correct clients can
@@ -417,7 +417,7 @@ config MSM_REMOTEQDSS
 
 config MSM_TZ_SMMU
 	depends on ARCH_MSM8953 || ARCH_QCS405 || ARCH_MSM8917 || ARCH_MSM8937
-	bool "Helper functions for SMMU configuration through TZ"
+	tristate "Helper functions for SMMU configuration through TZ"
 	help
 	  Say 'Y' here for targets that need to call into TZ to configure
 	  SMMUs for any reason (for example, for errata workarounds or
@@ -445,7 +445,7 @@ config MSM_SERVICE_NOTIFIER
 	  locator.
 
 config MSM_SUBSYSTEM_RESTART
-	bool "MSM Subsystem Restart"
+	tristate "MSM Subsystem Restart"
 	help
 	  This option enables the MSM subsystem restart framework.
 	
@@ -455,9 +455,9 @@ config MSM_SUBSYSTEM_RESTART
 	  sysfs.
 
 config MSM_PIL
-	bool "Peripheral image loading"
-	select FW_LOADER
-	default n
+	tristate "Peripheral image loading"
+	depends on FW_LOADER
+	depends on MSM_SUBSYSTEM_RESTART
 	help
 	  Some peripherals need to be loaded into memory before they can be
 	  brought out of reset.
@@ -500,7 +500,7 @@ config MSM_BOOT_STATS
 	  resolution of 31 bits as 1 bit is used as an overflow check.
 
 config QCOM_DCC_V2
-       bool "Qualcomm Technologies Data Capture and Compare enigne support for V2"
+       tristate "Qualcomm Technologies Data Capture and Compare enigne support for V2"
        help
          This option enables driver for Data Capture and Compare engine. DCC
          driver provides interface to configure DCC block and read back
@@ -518,8 +518,8 @@ config QCOM_EUD
 	  If unsure, say N.
 
 config QCOM_MINIDUMP
-	bool "QCOM Minidump Support"
-	depends on QCOM_SMEM && POWER_RESET_QCOM
+	tristate "QCOM Minidump Support"
+	depends on QCOM_SMEM
 	help
 	  This enables minidump feature. It allows various clients to
 	  register to dump their state at system bad state (panic/WDT,etc.,).
@@ -589,7 +589,7 @@ config PANIC_ON_GLADIATOR_ERROR
 	  If unsure, say N.
 
 config QCOM_FSA4480_I2C
-	bool "Fairchild FSA4480 chip with I2C"
+	tristate "Fairchild FSA4480 chip with I2C"
 	select REGMAP_I2C
 	depends on I2C
 	help
@@ -636,7 +636,7 @@ config QCOM_WDOG_IPI_ENABLE
 	  To track CPUs health on LPM, or on debug builds enable it.
 
 config QCOM_BUS_SCALING
-	bool "Bus scaling driver"
+	tristate "Bus scaling driver"
 	help
 	This option enables bus scaling on MSM devices.  Bus scaling
 	allows devices to request the clocks be set to rates sufficient
@@ -644,7 +644,7 @@ config QCOM_BUS_SCALING
 	frequency when a slower speed is sufficient.
 
 config  QCOM_BUS_CONFIG_RPMH
-	bool "RPMH Bus scaling driver"
+	tristate "RPMH Bus scaling driver"
 	depends on QCOM_BUS_SCALING
 	help
 	  This option enables bus scaling using QCOM specific hardware
@@ -752,7 +752,7 @@ config QCOM_SMCINVOKE
 	 userspace and kernel clients.
 
 config MSM_EVENT_TIMER
-	bool "Event timer"
+	tristate "Event timer"
         help
 	  This option enables a modules that manages a list of event timers
 	  that need to be monitored by the PM. The enables the PM code to
@@ -774,7 +774,7 @@ config MSM_PM
 
 if MSM_PM
 menuconfig MSM_IDLE_STATS
-	bool "Collect idle statistics"
+	tristate "Collect idle statistics"
 	help
 	  Collect cores various low power mode idle statistics
 	  and export them in proc/msm_pm_stats. User can read
@@ -816,7 +816,7 @@ config QTI_L2_REUSE
 	  cluster cpu. Use sysfs interface to control enabling this feature.
 
 config QTI_RPM_STATS_LOG
-	bool "Qualcomm Technologies RPM Stats Driver"
+	tristate "Qualcomm Technologies RPM Stats Driver"
 	depends on QCOM_RPMH || MSM_RPM_SMD
 	help
 	  This option enables a driver which reads RPM messages from a shared
@@ -836,6 +836,7 @@ config QTI_DDR_STATS_LOG
 config MSM_JTAGV8
 	bool "Debug and ETM trace support across power collapse for ARMv8"
 	default y if CORESIGHT_SOURCE_ETM4X
+	depends on QCOM_SOCINFO
 	help
 	  Enables support for debugging (specifically breakpoints) and ETM
 	  processor tracing across power collapse both for JTag and OS hosted
@@ -844,7 +845,7 @@ config MSM_JTAGV8
 	  If unsure, say 'N' here to avoid potential power, performance and
 	  memory penalty.
 config QTEE_SHM_BRIDGE
-	bool "QTI TEE shared memory bridge"
+	tristate "QTI TEE shared memory bridge"
 	help
 	  QTEE shared memory bridge driver provides kernel APIs to share
 	  memory between trustzone & other VMs through shared memory bridge.
@@ -869,7 +870,7 @@ config QMP_DEBUGFS_CLIENT
 	  to Alway On processor using QMP transport.
 
 config QCOM_CDSP_RM
-	bool "CDSP request manager"
+	tristate "CDSP request manager"
 	depends on QCOM_GLINK
 	help
 	  This driver serves CDSP requests for CPU L3 clock and CPU QoS thus
@@ -972,5 +973,10 @@ config ICNSS_QMI
 	  handshake messages to WLAN FW, which includes hardware capabilities
 	  and configurations. It also send WLAN on/off control message to FW
 	  over QMI channel.
+
+config QCOM_SOCINFO
+	tristate "Qualcomm socinfo driver"
+	depends on SOC_BUS
+	default ARCH_QCOM
 
 source "drivers/soc/qcom/wcnss/Kconfig"

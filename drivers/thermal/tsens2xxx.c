@@ -13,8 +13,6 @@
 #include "thermal_core.h"
 #include <soc/qcom/scm.h>
 
-#define TSENS_DRIVER_NAME			"msm-tsens"
-
 #define TSENS_TM_INT_EN(n)			((n) + 0x4)
 #define TSENS_TM_CRITICAL_INT_STATUS(n)		((n) + 0x14)
 #define TSENS_TM_CRITICAL_INT_CLEAR(n)		((n) + 0x18)

@@ -21,7 +21,7 @@
 
 #include <soc/qcom/socinfo.h>
 #include <linux/soc/qcom/smem.h>
-#include <soc/qcom/boot_stats.h>
+#include "boot_stats.h"
 
 #define BUILD_ID_LENGTH 32
 #define CHIP_ID_LENGTH 32
@@ -459,55 +459,6 @@ static char *msm_read_hardware_id(void)
 	return msm_soc_str;
 err_path:
 	return "UNKNOWN SOC TYPE";
-}
-
-const char * __init arch_read_machine_name(void)
-{
-	static char msm_machine_name[256] = "Qualcomm Technologies, Inc. ";
-	static bool string_generated;
-	u32 len = 0;
-	const char *name;
-
-	if (string_generated)
-		return msm_machine_name;
-
-	len = strlen(msm_machine_name);
-	name = of_get_flat_dt_prop(of_get_flat_dt_root(),
-				"qcom,msm-name", NULL);
-	if (name)
-		len += snprintf(msm_machine_name + len,
-					sizeof(msm_machine_name) - len,
-					"%s", name);
-	else
-		goto no_prop_path;
-
-	name = of_get_flat_dt_prop(of_get_flat_dt_root(),
-				"qcom,pmic-name", NULL);
-	if (name) {
-		len += snprintf(msm_machine_name + len,
-					sizeof(msm_machine_name) - len,
-					"%s", " ");
-		len += snprintf(msm_machine_name + len,
-					sizeof(msm_machine_name) - len,
-					"%s", name);
-	} else
-		goto no_prop_path;
-
-	name = of_flat_dt_get_machine_name();
-	if (name) {
-		len += snprintf(msm_machine_name + len,
-					sizeof(msm_machine_name) - len,
-					"%s", " ");
-		len += snprintf(msm_machine_name + len,
-					sizeof(msm_machine_name) - len,
-					"%s", name);
-	} else
-		goto no_prop_path;
-
-	string_generated = true;
-	return msm_machine_name;
-no_prop_path:
-	return of_flat_dt_get_machine_name();
 }
 
 uint32_t socinfo_get_raw_id(void)
@@ -1487,8 +1438,6 @@ static int __init socinfo_init_sysfs(void)
 	return 0;
 }
 
-late_initcall(socinfo_init_sysfs);
-
 static void socinfo_print(void)
 {
 	uint32_t f_maj = SOCINFO_VERSION_MAJOR(socinfo_format);
@@ -1797,6 +1746,11 @@ int __init socinfo_init(void)
 	arch_read_hardware_id = msm_read_hardware_id;
 	socinfo_init_done = true;
 
+	socinfo_init_sysfs();
+
 	return 0;
 }
 subsys_initcall(socinfo_init);
+
+MODULE_LICENSE("GPL v2");
+MODULE_DESCRIPTION("Qualcomm Socinfo driver");

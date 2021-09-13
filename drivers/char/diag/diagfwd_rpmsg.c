@@ -23,6 +23,8 @@
 
 #define PERI_RPMSG rpmsg_info->peripheral
 
+int register_as_rpmsg_driver(void);
+
 struct diag_rpmsg_read_work {
 	struct work_struct work;
 	struct list_head    rx_list_head;
@@ -916,7 +918,7 @@ int diag_rpmsg_init(void)
 	INIT_LIST_HEAD(&read_work_struct->rx_list_head);
 	spin_lock_init(&read_work_struct->rx_lock);
 
-	return 0;
+	return register_as_rpmsg_driver();
 }
 
 static void __diag_rpmsg_exit(struct diag_rpmsg_info *rpmsg_info)
@@ -1105,5 +1107,9 @@ static struct rpmsg_driver diag_rpmsg_drv = {
 	.callback	= diag_rpmsg_notify_cb,
 	.remove		= diag_rpmsg_remove,
 };
-module_rpmsg_driver(diag_rpmsg_drv);
+//module_rpmsg_driver(diag_rpmsg_drv);
 
+int register_as_rpmsg_driver(void)
+{
+  return __register_rpmsg_driver(&diag_rpmsg_drv, THIS_MODULE);
+}
