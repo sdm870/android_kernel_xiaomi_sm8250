@@ -133,7 +133,7 @@ do {                                                    \
 #define WCD_MBHC_JACK_USB_3_5_MASK (SND_JACK_UNSUPPORTED | SND_JACK_HEADSET)
 
 #define OCP_ATTEMPT 20
-#define HS_DETECT_PLUG_TIME_MS (3 * 1000)
+#define HS_DETECT_PLUG_TIME_MS (1 * 1000)
 #define SPECIAL_HS_DETECT_TIME_MS (2 * 1000)
 #define MBHC_BUTTON_PRESS_THRESHOLD_MIN 250
 #define GND_MIC_SWAP_THRESHOLD 4
@@ -574,6 +574,7 @@ struct wcd_mbhc {
 	bool skip_imped_detection;
 	bool is_btn_already_regd;
 	bool extn_cable_hph_rem;
+	bool swap_detect;
 
 	struct snd_soc_component *component;
 	/* Work to perform MBHC Firmware Read */

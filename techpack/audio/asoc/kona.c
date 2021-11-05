@@ -973,8 +973,8 @@ static struct wcd_mbhc_config wcd_mbhc_cfg = {
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = true,
 	.key_code[0] = KEY_MEDIA,
-	.key_code[1] = KEY_VOICECOMMAND,
-	.key_code[2] = KEY_VOLUMEUP,
+	.key_code[1] = KEY_VOLUMEUP,
+	.key_code[2] = KEY_VOICECOMMAND,
 	.key_code[3] = KEY_VOLUMEDOWN,
 	.key_code[4] = 0,
 	.key_code[5] = 0,
@@ -4777,6 +4777,7 @@ static int kona_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
 	int ret = 0;
 	int slot_width = TDM_SLOT_WIDTH_BITS;
 	int channels, slots;
@@ -4785,6 +4786,10 @@ static int kona_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 	struct tdm_dev_config *config;
 	struct msm_asoc_mach_data *pdata = NULL;
 	unsigned int path_dir = 0, interface = 0, channel_interface = 0;
+
+	int i = 0;
+	struct snd_soc_dai **codec_dais = rtd->codec_dais;
+	int TERT_TDM_MAX_SLOTS = 8;
 
 	pr_debug("%s: dai id = 0x%x\n", __func__, cpu_dai->id);
 
@@ -4830,6 +4835,16 @@ static int kona_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 		channels = tdm_rx_cfg[interface][channel_interface].channels;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		if (cpu_dai->id == AFE_PORT_ID_TERTIARY_TDM_RX) {
+			slots = TERT_TDM_MAX_SLOTS;
+			if (channels > slots) {
+				pr_info("%s: Incorrect TERT TDM RX ch: %d",
+					__func__, channels);
+				channels = slots;
+				tdm_rx_cfg[interface][channel_interface] \
+				.channels = slots;
+			}
+		}
 		/*2 slot config - bits 0 and 1 set for the first two slots */
 		slot_mask = 0x0000FFFF >> (16 - slots);
 
@@ -4854,6 +4869,16 @@ static int kona_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 			goto end;
 		}
 	} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+		if (cpu_dai->id == AFE_PORT_ID_TERTIARY_TDM_RX) {
+			slots = TERT_TDM_MAX_SLOTS;
+			if (channels > slots) {
+				pr_info("%s: Incorrect TERT TDM RX ch: %d",
+					__func__, channels);
+				channels = slots;
+				tdm_rx_cfg[interface][channel_interface] \
+				.channels = slots;
+			}
+		}
 		/*2 slot config - bits 0 and 1 set for the first two slots */
 		slot_mask = 0x0000FFFF >> (16 - slots);
 
@@ -4890,6 +4915,32 @@ static int kona_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 	if (ret < 0)
 		pr_err("%s: failed to set tdm clk, err:%d\n",
 			__func__, ret);
+
+	for (i = 0; i < rtd->num_codecs; i++) {
+		if (codec_dais[i] == NULL ||
+			cpu_dai->id != AFE_PORT_ID_TERTIARY_TDM_RX)
+			continue;
+		ret = snd_soc_dai_set_fmt(codec_dais[i],
+				SND_SOC_DAIFMT_DSP_A |
+				SND_SOC_DAIFMT_CBS_CFS |
+				SND_SOC_DAIFMT_NB_NF);
+		if (ret != 0)
+			dev_err(codec_dai->dev,
+				"Failed to set dai format for %s, ret = %d\n",
+				codec_dai->name, ret);
+		ret = snd_soc_dai_set_sysclk(codec_dais[i], 0, clk_freq,
+				SND_SOC_CLOCK_IN);
+		if (ret != 0)
+			dev_err(codec_dai->dev,
+				"Failed to set dai clock %u, ret = %d\n",
+				clk_freq, ret);
+		ret = snd_soc_component_set_sysclk(codec_dais[i]->component,
+					0, 0, clk_freq, SND_SOC_CLOCK_IN);
+		if (ret != 0)
+			dev_err(codec_dai->dev,
+				"Failed to set codec clock %u, ret = %d\n",
+				clk_freq, ret);
+	}
 
 end:
 	return ret;
@@ -5935,13 +5986,13 @@ static void *def_wcd_mbhc_cal(void)
 		(sizeof(btn_cfg->_v_btn_low[0]) * btn_cfg->num_btn);
 
 	btn_high[0] = 75;
-	btn_high[1] = 260;
-	btn_high[2] = 500;
-	btn_high[3] = 500;
-	btn_high[4] = 500;
-	btn_high[5] = 500;
-	btn_high[6] = 500;
-	btn_high[7] = 500;
+	btn_high[1] = 150;
+	btn_high[2] = (u16)237.5;
+	btn_high[3] = (u16)437.5;
+	btn_high[4] = (u16)437.5;
+	btn_high[5] = (u16)437.5;
+	btn_high[6] = (u16)437.5;
+	btn_high[7] = (u16)437.5;
 
 	return wcd_mbhc_cal;
 }

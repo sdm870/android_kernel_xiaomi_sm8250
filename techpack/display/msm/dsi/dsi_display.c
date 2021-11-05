@@ -7,6 +7,7 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/err.h>
+#include <linux/sysfs.h>
 #include <drm/drm_notifier_mi.h>
 
 #include "msm_drv.h"
@@ -4948,6 +4949,92 @@ error:
 	return rc;
 }
 
+static ssize_t fod_hbm_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+	if (!display->panel)
+		return 0;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", display->panel->fod_hbm_mode);
+}
+
+static ssize_t fod_hbm_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+	int ret, fod_hbm_mode;
+
+	if (!display->panel)
+		return -EINVAL;
+
+	ret = kstrtoint(buf, 10, &fod_hbm_mode);
+	if (ret) {
+		pr_err("kstrtoint failed. ret=%d\n", ret);
+		return ret;
+	}
+
+	mutex_lock(&display->display_lock);
+
+	display->panel->fod_hbm_mode = fod_hbm_mode;
+	if (!dsi_panel_initialized(display->panel))
+		goto error;
+
+	ret = dsi_display_clk_ctrl(display->dsi_clk_handle,
+			DSI_CORE_CLK, DSI_CLK_ON);
+	if (ret) {
+		pr_err("[%s] failed to enable DSI core clocks, rc=%d\n",
+		       display->name, ret);
+		goto error;
+	}
+
+	ret = dsi_panel_apply_fod_hbm_mode(display->panel);
+	if (ret)
+		pr_err("unable to set fod hbm mode\n");
+
+	ret = dsi_display_clk_ctrl(display->dsi_clk_handle,
+			DSI_CORE_CLK, DSI_CLK_OFF);
+	if (ret) {
+		pr_err("[%s] failed to disable DSI core clocks, rc=%d\n",
+		       display->name, ret);
+		goto error;
+	}
+error:
+	mutex_unlock(&display->display_lock);
+	return ret == 0 ? count : ret;
+}
+
+static DEVICE_ATTR_RW(fod_hbm);
+
+static struct attribute *disp_device_attrs[] = {
+	&dev_attr_fod_hbm.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(disp_device);
+
+static int dsi_display_sysfs_init(struct dsi_display *display)
+{
+	int rc = 0;
+	struct device *dev = &display->pdev->dev;
+
+	rc = sysfs_create_groups(&dev->kobj, disp_device_groups);
+	if (rc)
+		pr_err("failed to create display features attributes");
+
+	return rc;
+
+}
+
+static int dsi_display_sysfs_deinit(struct dsi_display *display)
+{
+	struct device *dev = &display->pdev->dev;
+
+	sysfs_remove_groups(&dev->kobj, disp_device_groups);
+
+	return 0;
+
+}
+
 /**
  * dsi_display_bind - bind dsi device with controlling device
  * @dev:        Pointer to base of platform device
@@ -5018,6 +5105,12 @@ static int dsi_display_bind(struct device *dev,
 
 	atomic_set(&display->clkrate_change_pending, 0);
 	display->cached_clk_rate = 0;
+
+	rc = dsi_display_sysfs_init(display);
+	if (rc) {
+		DSI_ERR("[%s] sysfs init failed, rc=%d\n", display->name, rc);
+		goto error;
+	}
 
 	memset(&info, 0x0, sizeof(info));
 
@@ -5170,6 +5263,7 @@ error_ctrl_deinit:
 		(void)dsi_phy_drv_deinit(display_ctrl->phy);
 		(void)dsi_ctrl_drv_deinit(display_ctrl->ctrl);
 	}
+	(void)dsi_display_sysfs_deinit(display);
 	(void)dsi_display_debugfs_deinit(display);
 error:
 	mutex_unlock(&display->display_lock);
@@ -5230,6 +5324,7 @@ static void dsi_display_unbind(struct device *dev,
 	}
 
 	atomic_set(&display->clkrate_change_pending, 0);
+	(void)dsi_display_sysfs_deinit(display);
 	(void)dsi_display_debugfs_deinit(display);
 
 	mutex_unlock(&display->display_lock);
@@ -7249,6 +7344,7 @@ int dsi_display_prepare(struct dsi_display *display)
 				goto error_ctrl_link_off;
 			}
 		}
+#ifndef CONFIG_BOARD_APOLLO
 	} else {
 		/* Keep the screen brightness for continuous splash. */
 		rc = dsi_panel_bl_brightness_handoff(display->panel);
@@ -7257,6 +7353,7 @@ int dsi_display_prepare(struct dsi_display *display)
 					display->panel->name, rc);
 			/* Ignore error and use default brightness */
 		}
+#endif
 	}
 	goto error;
 

@@ -241,7 +241,8 @@ struct smb5 {
 
 static struct smb_charger *__smbchg;
 
-static int __debug_mask = PR_MISC | PR_WLS | PR_OEM | PR_PARALLEL;
+/* All flags turned on */
+static int __debug_mask = -1;
 
 static ssize_t pd_disabled_show(struct device *dev, struct device_attribute
 				*attr, char *buf)
@@ -3329,6 +3330,7 @@ static int smb5_batt_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_WARM_FAKE_CHARGING:
 	case POWER_SUPPLY_PROP_RECHARGE_VBAT:
 	case POWER_SUPPLY_PROP_NIGHT_CHARGING:
+	case POWER_SUPPLY_PROP_HEALTH:
 		return 1;
 	default:
 		break;
@@ -3797,7 +3799,7 @@ static int smb5_init_dc_peripheral(struct smb_charger *chg)
 		return 0;
 
 	/* Set DCIN ICL to 100 mA */
-	rc = smblib_set_charge_param(chg, &chg->param.dc_icl, DCIN_ICL_MIN_UA);
+	rc = vote(chg->dc_icl_votable, DCIN_AICL_VOTER, true, DCIN_ICL_MIN_UA);
 	if (rc < 0) {
 		dev_err(chg->dev, "Couldn't set dc_icl rc=%d\n", rc);
 		return rc;
@@ -4989,10 +4991,16 @@ static int smb5_probe(struct platform_device *pdev)
 	else
 		return -EPROBE_DEFER;
 
+	chg->log = logbuffer_register("smblib");
+	if (IS_ERR_OR_NULL(chg->log)) {
+		pr_err("failed to obtain logbuffer instance\n");
+		chg->log = NULL;
+	}
+
 	rc = smblib_init(chg);
 	if (rc < 0) {
 		pr_err("Smblib_init failed rc=%d\n", rc);
-		return rc;
+		goto unregister_buffer;
 	}
 
 	/* set driver data before resources request it */
@@ -5157,6 +5165,9 @@ free_irq:
 cleanup:
 	smblib_deinit(chg);
 	platform_set_drvdata(pdev, NULL);
+unregister_buffer:
+	if (chg->log)
+		logbuffer_unregister(chg->log);
 
 	return rc;
 }
@@ -5174,6 +5185,8 @@ static int smb5_remove(struct platform_device *pdev)
 	smblib_deinit(chg);
 	sysfs_remove_groups(&chg->dev->kobj, smb5_groups);
 	platform_set_drvdata(pdev, NULL);
+	if (chg->log)
+		logbuffer_unregister(chg->log);
 
 	return 0;
 }

@@ -1638,7 +1638,9 @@ int msm_pcm_routing_reg_phy_compr_stream(int fe_id, int perf_mode,
 				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
+			#ifdef CONFIG_MSM_CSPL
 			msm_crus_pb_set_copp_idx(port_id, copp_idx);
+			#endif
 			pr_debug("%s: set idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, fe_id, session_type, i);
 			set_bit(copp_idx,
@@ -2000,7 +2002,9 @@ int msm_pcm_routing_reg_phy_stream(int fedai_id, int perf_mode,
 				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
+			#ifdef CONFIG_MSM_CSPL
 			msm_crus_pb_set_copp_idx(port_id, copp_idx);
+			#endif
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, fedai_id, session_type, i);
 			set_bit(copp_idx,
@@ -2285,7 +2289,9 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 				mutex_unlock(&routing_lock);
 				return;
 			}
+			#ifdef CONFIG_MSM_CSPL
 			msm_crus_pb_set_copp_idx(port_id, copp_idx);
+			#endif
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, val, session_type, reg);
 			set_bit(copp_idx,
@@ -30506,7 +30512,9 @@ static int msm_pcm_routing_prepare(struct snd_pcm_substream *substream)
 				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
+			#ifdef CONFIG_MSM_CSPL
 			msm_crus_pb_set_copp_idx(port_id, copp_idx);
+			#endif
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, i, session_type, be_id);
 			set_bit(copp_idx,

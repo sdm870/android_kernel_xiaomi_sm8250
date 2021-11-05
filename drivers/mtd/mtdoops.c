@@ -38,6 +38,14 @@
 #include <generated/compile.h>
 #include <linux/version.h>
 
+extern struct ramoops_platform_data ramoops_data;
+struct pmsg_buffer_hdr {
+	uint32_t    sig;
+	atomic_t    start;
+	atomic_t    size;
+	uint8_t     data[0];
+};
+
 /* Maximum MTD partition size */
 #define MTDOOPS_MAX_MTD_SIZE (16 * 1024 * 1024)
 
@@ -61,12 +69,10 @@ enum mtdoops_log_type {
 };
 static char *log_type[4] = {
 	"Unknown",
-	"Kmsg",
-	"Logcat"
+	"LAST KMSG",
+	"LAST LOGCAT"
 };
 
-extern struct ramoops_platform_data ramoops_data;
-extern struct pmsg_start_t pmsg_start;
 static unsigned long record_size = 4096;
 static unsigned long lkmsg_record_size = 512 * 1024;
 module_param(record_size, ulong, 0400);
@@ -82,8 +88,6 @@ static int dump_oops = 0;
 module_param(dump_oops, int, 0600);
 MODULE_PARM_DESC(dump_oops,
 		"set to 1 to dump oopses, 0 to only dump panics (default 1)");
-
-static int work_done = 0;
 
 static struct mtdoops_context {
 	struct kmsg_dumper dump;
@@ -261,7 +265,6 @@ static void mtdoops_workfunc_write(struct work_struct *work)
 			container_of(work, struct mtdoops_context, work_write);
 
 	mtdoops_write(cxt, 0);
-	work_done = 1;
 }
 
 static void find_next_position(struct mtdoops_context *cxt)
@@ -321,31 +324,37 @@ static void mtdoops_add_reason(char *oops_buf, enum kmsg_dump_reason reason, enu
 {
 	char str_buf[200] = {0};
 	int ret_len = 0;
-	struct timespec now;
+	struct timespec64 now;
 	struct tm ts;
 
-	now = current_kernel_time();
-	time_to_tm(now.tv_sec, 0, &ts);
+	ktime_get_coarse_real_ts64(&now);
+	time64_to_tm(now.tv_sec, 0, &ts);
 
-	if (nextpage > 0)
+	if (nextpage > 1)
 		ret_len =  snprintf(str_buf, 200,
-				"\n```\n# Index: %d\t\n## Build: %s\t\n## Reason: %s\n### %04ld-%02d-%02d %02d:%02d:%02d\n#### Log type: %s\t\n```\t\n",
-				index, UTS_VERSION, kdump_reason[reason], ts.tm_year+1900, ts.tm_mon+1, ts.tm_mday, ts.tm_hour+8, ts.tm_min, ts.tm_sec, log_type[type]);
+				"\n```\n## Index: %d\t\n### Build: %s\t\n## REASON: %s\n#### LOG TYPE:%s\n#####%04ld-%02d-%02d %02d:%02d:%02d\t\n```c\t\n",
+				index, UTS_VERSION, kdump_reason[reason], log_type[type], ts.tm_year+1900, ts.tm_mon+1, ts.tm_mday, ts.tm_hour, ts.tm_min, ts.tm_sec);
 	else
 		ret_len =  snprintf(str_buf, 200,
-				"\n\n# Index: %d\t\n## Build: %s\t\n## Reason: %s\n### %04ld-%02d-%02d %02d:%02d:%02d\n#### Log type: %s\t\n```\t\n",
-				index, UTS_VERSION, kdump_reason[reason], ts.tm_year+1900, ts.tm_mon+1, ts.tm_mday, ts.tm_hour+8, ts.tm_min, ts.tm_sec, log_type[type]);
+				"\n\n## Index: %d\t\n### Build: %s\t\n## REASON: %s\n#### LOG TYPE: %s\n#####%04ld-%02d-%02d %02d:%02d:%02d\t\n```c\t\n",
+				index, UTS_VERSION, kdump_reason[reason], log_type[type], ts.tm_year+1900, ts.tm_mon+1, ts.tm_mday, ts.tm_hour, ts.tm_min, ts.tm_sec);
 
 	memcpy(oops_buf, str_buf, ret_len);
 }
 
 static void mtdoops_add_pmsg_head(char *oops_buf, enum mtdoops_log_type type)
 {
-	char str_buf[40] = {0};
+	char str_buf[80] = {0};
 	int ret_len = 0;
+	struct timespec64 now;
+	struct tm ts;
 
-	ret_len =  snprintf(str_buf, 40,
-			"\n```\n#### Log type: %s\t\n```\t\n", log_type[type]);
+	ktime_get_coarse_real_ts64(&now);
+	time64_to_tm(now.tv_sec, 0, &ts);
+
+	ret_len =  snprintf(str_buf, 80,
+			"\n```\n#### LOG TYPE:%s\n#####%04ld-%02d-%02d %02d:%02d:%02d\t\n```c\t\n",
+			log_type[type], ts.tm_year+1900, ts.tm_mon, ts.tm_mday, ts.tm_hour, ts.tm_min, ts.tm_sec);
 
 	memcpy(oops_buf, str_buf, ret_len);
 }
@@ -355,44 +364,52 @@ static void mtdoops_do_dump(struct kmsg_dumper *dumper,
 {
 	struct mtdoops_context *cxt = container_of(dumper,
 			struct mtdoops_context, dump);
+
 	size_t ret_len = 0;
-	size_t pmsg_rem = 0;
-	size_t pmsg_cpy_size= 0;
-	void *pmsg_addr;
+	char *pmsg_buffer_start = NULL;
+	struct pmsg_buffer_hdr *p_hdr = NULL;
+
+	pmsg_buffer_start = phys_to_virt((ramoops_data.mem_address + ramoops_data.mem_size) - ramoops_data.pmsg_size);
+	p_hdr = (struct pmsg_buffer_hdr *)pmsg_buffer_start;
 
 	/* Only dump oopses if dump_oops is set */
 	if (reason == KMSG_DUMP_OOPS && !dump_oops)
 		return;
 
 	kmsg_dump_get_buffer(dumper, true, cxt->oops_buf + MTDOOPS_HEADER_SIZE,
-			     lkmsg_record_size - MTDOOPS_HEADER_SIZE, &ret_len);
+						lkmsg_record_size - MTDOOPS_HEADER_SIZE, &ret_len);
 
-	mtdoops_add_reason(cxt->oops_buf+8, reason, MTDOOPS_TYPE_DMESG, cxt->nextcount, cxt->nextpage);
+	mtdoops_add_reason(cxt->oops_buf + MTDOOPS_HEADER_SIZE, reason, MTDOOPS_TYPE_DMESG, cxt->nextcount, cxt->nextpage);
 
-	pmsg_addr = (void *)phys_to_virt((ramoops_data.mem_address + ramoops_data.mem_size) - ramoops_data.pmsg_size);
-	pmsg_cpy_size = record_size - (ret_len + MTDOOPS_HEADER_SIZE);
+	if(p_hdr->sig == 0x43474244)
+	{
+		void *oopsbuf = cxt->oops_buf + (MTDOOPS_HEADER_SIZE + ret_len);
+		uint8_t *p_buff_end = p_hdr->data + p_hdr->size.counter;
+		int pmsg_cp_size = 0;
+		int pstart = p_hdr->start.counter;
+		int psize = p_hdr->size.counter;
 
-	spin_lock(&pmsg_start.lock);
-	if(pmsg_start.start >= pmsg_cpy_size)
-		memcpy(cxt->oops_buf + (ret_len + MTDOOPS_HEADER_SIZE), pmsg_addr + (pmsg_start.start - pmsg_cpy_size), pmsg_cpy_size);
-	else {
-		pmsg_rem = pmsg_cpy_size - pmsg_start.start;
-		memcpy(cxt->oops_buf + (ret_len + MTDOOPS_HEADER_SIZE), pmsg_addr + (ramoops_data.pmsg_size - pmsg_rem), pmsg_rem);
-		memcpy(cxt->oops_buf + ((ret_len + MTDOOPS_HEADER_SIZE) + pmsg_rem), pmsg_addr, pmsg_start.start);
+		pmsg_cp_size = (record_size - (ret_len + MTDOOPS_HEADER_SIZE));
+		if (psize <= pmsg_cp_size)
+			pmsg_cp_size = psize;
+
+		if (pstart >= pmsg_cp_size)
+			memcpy(oopsbuf, p_hdr->data, pmsg_cp_size);
+		else{
+			memcpy(oopsbuf, p_buff_end - (pmsg_cp_size - pstart), pmsg_cp_size - pstart);
+			memcpy(oopsbuf + (pmsg_cp_size - pstart), p_hdr->data, pstart);
+		}
+		mtdoops_add_pmsg_head(cxt->oops_buf + (MTDOOPS_HEADER_SIZE + ret_len), MTDOOPS_TYPE_PMSG);
 	}
-	spin_unlock(&pmsg_start.lock);
+	else
+		printk(KERN_ERR "mtdoops: read pmsg failed sig = 0x%x \n", p_hdr->sig);
 
-	mtdoops_add_pmsg_head(cxt->oops_buf + ret_len, MTDOOPS_TYPE_PMSG);
-
-	if (reason != KMSG_DUMP_OOPS || reason == KMSG_DUMP_PANIC) {
+	if (reason == KMSG_DUMP_OOPS || reason == KMSG_DUMP_PANIC) {
 		/* Panics must be written immediately */
 		mtdoops_write(cxt, 1);
 	} else {
 		/* For other cases, schedule work to write it "nicely" */
 		schedule_work(&cxt->work_write);
-		while (work_done == 0)
-			mdelay(1);
-		work_done = 0;
 	}
 }
 
@@ -505,7 +522,6 @@ static int __init mtdoops_init(void)
 
 	INIT_WORK(&cxt->work_erase, mtdoops_workfunc_erase);
 	INIT_WORK(&cxt->work_write, mtdoops_workfunc_write);
-	spin_lock_init(&pmsg_start.lock);
 
 	register_mtd_user(&mtdoops_notifier);
 	return 0;

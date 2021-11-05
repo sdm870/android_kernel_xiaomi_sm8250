@@ -281,6 +281,8 @@ enum dsi_dyn_clk_feature_type {
  * @DSI_CMD_SET_POST_TIMING_SWITCH:        Post timing switch
  * @DSI_CMD_SET_QSYNC_ON                   Enable qsync mode
  * @DSI_CMD_SET_QSYNC_OFF                  Disable qsync mode
+ * @DSI_CMD_SET_DISP_HBM_FOD_ON            Enable fod hbm mode
+ * @DSI_CMD_SET_DISP_HBM_FOD_OFF           Disable fod hbm mode
  * @DSI_CMD_SET_MAX
  */
 enum dsi_cmd_set_type {
@@ -309,7 +311,9 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_QSYNC_ON,
 	DSI_CMD_SET_QSYNC_OFF,
 	DSI_CMD_SET_MI_READ_LOCKDOWN_INFO,
-	DSI_CMD_SET_MAX
+	DSI_CMD_SET_DISP_HBM_FOD_ON,
+	DSI_CMD_SET_DISP_HBM_FOD_OFF,
+	DSI_CMD_SET_MAX,
 };
 
 /**

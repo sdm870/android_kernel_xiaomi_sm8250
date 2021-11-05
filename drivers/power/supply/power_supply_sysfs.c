@@ -272,8 +272,14 @@ static ssize_t power_supply_show_property(struct device *dev,
 		break;
 	case POWER_SUPPLY_PROP_VERIFY_MODEL_NAME:
 #endif
-	case POWER_SUPPLY_PROP_MODEL_NAME ... POWER_SUPPLY_PROP_SERIAL_NUMBER:
+	case POWER_SUPPLY_PROP_MODEL_NAME ... POWER_SUPPLY_PROP_CYCLE_COUNTS:
 		ret = sprintf(buf, "%s\n", value.strval);
+		break;
+	/*
+	 * FIXME: b/139264914, ignore it temporarily to avoid hit NULL point.
+	 * will review it
+	 */
+	case POWER_SUPPLY_PROP_SERIAL_NUMBER:
 		break;
 	default:
 		ret = sprintf(buf, "%d\n", value.intval);
@@ -593,6 +599,14 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(apsd_rerun),
 	POWER_SUPPLY_ATTR(apsd_timeout),
 	POWER_SUPPLY_ATTR(otg_fastroleswap),
+	POWER_SUPPLY_ATTR(aicl_delay),
+	POWER_SUPPLY_ATTR(aicl_icl),
+	/* Capacity Estimation */
+	POWER_SUPPLY_ATTR(batt_ce_ctrl),
+	POWER_SUPPLY_ATTR(batt_ce_full),
+	/* Resistance Estimaton */
+	POWER_SUPPLY_ATTR(resistance_avg),
+	POWER_SUPPLY_ATTR(batt_res_filt_cnts),
 	/* Charge pump properties */
 	POWER_SUPPLY_ATTR(cp_status1),
 	POWER_SUPPLY_ATTR(cp_status2),
@@ -606,6 +620,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(cp_ilim),
 	POWER_SUPPLY_ATTR(irq_status),
 	POWER_SUPPLY_ATTR(parallel_output_mode),
+	POWER_SUPPLY_ATTR(alignment),
 	POWER_SUPPLY_ATTR(cc_toggle_enable),
 	POWER_SUPPLY_ATTR(moisture_detection_enabled),
 	POWER_SUPPLY_ATTR(cp_win_ov),
@@ -675,6 +690,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(charge_counter_ext),
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_ATTR(model_name),
+	POWER_SUPPLY_ATTR(ptmc_id),
 	POWER_SUPPLY_ATTR(manufacturer),
 	POWER_SUPPLY_ATTR(battery_type),
 	POWER_SUPPLY_ATTR(cycle_counts),

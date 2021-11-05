@@ -22,6 +22,19 @@
 #include "storm-watch.h"
 #include "schgm-flash.h"
 
+#if IS_ENABLED(CONFIG_GOOGLE_LOGBUFFER)
+#define smblib_err(chg, fmt, ...)				\
+	logbuffer_log(chg->log, "%s: %s: " fmt,			\
+		      chg->name, __func__, ##__VA_ARGS__)	\
+
+#define smblib_dbg(chg, reason, fmt, ...)			\
+	do {							\
+		if (*chg->debug_mask & (reason))		\
+			logbuffer_log(chg->log, "%s: %s: " fmt, \
+				      chg->name, __func__,	\
+				      ##__VA_ARGS__);		\
+	} while (0)
+#else
 #define smblib_err(chg, fmt, ...)		\
 	pr_err("%s: %s: " fmt, chg->name,	\
 		__func__, ##__VA_ARGS__)	\
@@ -29,12 +42,13 @@
 #define smblib_dbg(chg, reason, fmt, ...)			\
 	do {							\
 		if (*chg->debug_mask & (reason))		\
-			pr_err("%s: %s: " fmt, chg->name,	\
+			pr_info("%s: %s: " fmt, chg->name,	\
 				__func__, ##__VA_ARGS__);	\
 		else						\
 			pr_debug("%s: %s: " fmt, chg->name,	\
 				__func__, ##__VA_ARGS__);	\
 	} while (0)
+#endif
 
 #define typec_rp_med_high(chg, typec_mode)			\
 	((typec_mode == POWER_SUPPLY_TYPEC_SOURCE_MEDIUM	\
@@ -2209,6 +2223,39 @@ static int smblib_dc_suspend_vote_callback(struct votable *votable, void *data,
 		suspend = 0;
 
 	return smblib_set_dc_suspend(chg, (bool)suspend);
+}
+
+static int smblib_dc_icl_vote_callback(struct votable *votable, void *data,
+			int icl_ua, const char *client)
+{
+	struct smb_charger *chg = data;
+	int rc = 0;
+	bool suspend;
+
+	if (icl_ua < 0) {
+		smblib_dbg(chg, PR_MISC, "No Voter hence suspending\n");
+		icl_ua = 0;
+	}
+
+	suspend = (icl_ua <= USBIN_25MA);
+	if (suspend)
+		goto suspend;
+
+	rc = smblib_set_charge_param(chg, &chg->param.dc_icl, icl_ua);
+	if (rc < 0) {
+		smblib_err(chg, "Couldn't set DC input current limit rc=%d\n",
+			rc);
+		return rc;
+	}
+
+suspend:
+	rc = vote(chg->dc_suspend_votable, USER_VOTER, suspend, 0);
+	if (rc < 0) {
+		smblib_err(chg, "Couldn't vote to %s DC rc=%d\n",
+			suspend ? "suspend" : "resume", rc);
+		return rc;
+	}
+	return rc;
 }
 
 static int smblib_awake_vote_callback(struct votable *votable, void *data,
@@ -5332,6 +5379,53 @@ int smblib_get_prop_dc_voltage_now(struct smb_charger *chg,
 	return rc;
 }
 
+int smblib_get_prop_dc_aicl_delay(struct smb_charger *chg,
+				  union power_supply_propval *val)
+{
+	int rc;
+
+	if (!chg->wls_psy) {
+		chg->wls_psy = power_supply_get_by_name("wireless");
+		if (!chg->wls_psy)
+			return -ENODEV;
+	}
+
+	rc = power_supply_get_property(chg->wls_psy,
+				       POWER_SUPPLY_PROP_AICL_DELAY,
+				       val);
+	if (rc < 0) {
+		dev_err(chg->dev,
+			"Couldn't get POWER_SUPPLY_PROP_AICL_DELAY, rc=%d\n",
+			rc);
+		return rc;
+	}
+
+	return rc;
+}
+
+int smblib_get_prop_dc_aicl_icl(struct smb_charger *chg,
+				union power_supply_propval *val)
+{
+	int rc;
+
+	if (!chg->wls_psy) {
+		chg->wls_psy = power_supply_get_by_name("wireless");
+		if (!chg->wls_psy)
+			return -ENODEV;
+	}
+
+	rc = power_supply_get_property(chg->wls_psy,
+				       POWER_SUPPLY_PROP_AICL_ICL,
+				       val);
+	if (rc < 0) {
+		dev_err(chg->dev,
+			"Couldn't get POWER_SUPPLY_PROP_AICL_ICL, rc=%d\n",
+			rc);
+		return rc;
+	}
+
+	return rc;
+}
 /*******************
  * DC PSY SETTERS *
  *******************/
@@ -10512,6 +10606,7 @@ static void dcin_aicl(struct smb_charger *chg)
 	int rc, icl, icl_save;
 	int input_present;
 	bool aicl_done = true;
+	union power_supply_propval val;
 
 	/*
 	 * Hold awake votable to prevent pm_relax being called prior to
@@ -10538,9 +10633,16 @@ increment:
 	}
 
 	icl = min(chg->wls_icl_ua, icl + DCIN_ICL_STEP_UA);
+
+	rc = smblib_get_prop_dc_aicl_icl(chg, &val);
+	if (rc == 0)
+		if ((val.intval > DCIN_ICL_MIN_UA) &&
+		    (val.intval < chg->wls_icl_ua))
+			icl = (icl < val.intval) ? val.intval : icl;
+
 	icl_save = icl;
 
-	rc = smblib_set_charge_param(chg, &chg->param.dc_icl, icl);
+	rc = vote(chg->dc_icl_votable, DCIN_AICL_VOTER, true, icl);
 	if (rc < 0)
 		goto err;
 
@@ -10592,6 +10694,14 @@ unvote:
 	chg->dcin_aicl_done = aicl_done;
 }
 
+static void dcin_aicl_delay_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work, struct smb_charger,
+					       dcin_aicl_delay_work.work);
+
+	dcin_aicl(chg);
+}
+
 static void dcin_aicl_work(struct work_struct *work)
 {
 	struct smb_charger *chg = container_of(work, struct smb_charger,
@@ -10637,7 +10747,7 @@ static void dcin_icl_decrement(struct smb_charger *chg)
 		icl -= DCIN_ICL_STEP_UA;
 
 		smblib_dbg(chg, PR_WLS, "icl: %d mA\n", (icl / 1000));
-		rc = smblib_set_charge_param(chg, &chg->param.dc_icl, icl);
+		rc = vote(chg->dc_icl_votable, DCIN_AICL_VOTER, true, icl);
 		if (rc < 0) {
 			smblib_err(chg, "setting DCIN ICL failed: %d\n", rc);
 			return;
@@ -10670,15 +10780,17 @@ irqreturn_t dcin_uv_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+#define DCIN_AICL_DELAY_DEFAULT	      1000
 irqreturn_t dc_plugin_irq_handler(int irq, void *data)
 {
 	struct smb_irq_data *irq_data = data;
 	struct smb_charger *chg = irq_data->parent_data;
-	union power_supply_propval pval;
+	union power_supply_propval pval, val;
 	int input_present;
 	bool dcin_present, vbus_present, usb_online;
 	int rc, wireless_vout = 0, wls_set = 0;
 	int sec_charger;
+	int delay_ms = DCIN_AICL_DELAY_DEFAULT;
 
 	/* directly return irq_handled if use bq wireless solution */
 	if (chg->wireless_bq)
@@ -10705,12 +10817,12 @@ irqreturn_t dc_plugin_irq_handler(int irq, void *data)
 		chg->cp_ilim_votable = find_votable("CP_ILIM");
 
 	if (dcin_present && !usb_online) {
-		cancel_work_sync(&chg->dcin_aicl_work);
+		cancel_delayed_work_sync(&chg->dcin_aicl_delay_work);
 
 		/* Reset DCIN ICL to 100 mA */
 		mutex_lock(&chg->dcin_aicl_lock);
-		rc = smblib_set_charge_param(chg, &chg->param.dc_icl,
-				DCIN_ICL_MIN_UA);
+		rc = vote(chg->dc_icl_votable,
+			  DCIN_AICL_VOTER, true, DCIN_ICL_MIN_UA);
 		mutex_unlock(&chg->dcin_aicl_lock);
 		if (rc < 0)
 			return IRQ_HANDLED;
@@ -10765,7 +10877,13 @@ irqreturn_t dc_plugin_irq_handler(int irq, void *data)
 					rc);
 		}
 
-		schedule_work(&chg->dcin_aicl_work);
+		/* add delay for SW DCIN AICL to wait Vout stable */
+		rc = smblib_get_prop_dc_aicl_delay(chg, &val);
+		if (rc == 0)
+			delay_ms = (val.intval > 0) ?
+				    val.intval : DCIN_AICL_DELAY_DEFAULT;
+		schedule_delayed_work(&chg->dcin_aicl_delay_work,
+				      msecs_to_jiffies(delay_ms));
 	} else {
 		if (chg->cp_reason == POWER_SUPPLY_CP_WIRELESS) {
 			sec_charger = chg->sec_pl_present ?
@@ -12310,6 +12428,16 @@ static int smblib_create_votables(struct smb_charger *chg)
 		return rc;
 	}
 
+	chg->dc_icl_votable = create_votable("DC_ICL", VOTE_MIN,
+					smblib_dc_icl_vote_callback,
+					chg);
+	if (IS_ERR(chg->dc_icl_votable)) {
+		rc = PTR_ERR(chg->dc_icl_votable);
+		smblib_err(chg, "Couldn't create DC_ICL rc=%d\n", rc);
+		chg->dc_icl_votable = NULL;
+		return rc;
+	}
+
 	chg->awake_votable = create_votable("AWAKE", VOTE_SET_ANY,
 					smblib_awake_vote_callback,
 					chg);
@@ -12451,6 +12579,7 @@ int smblib_init(struct smb_charger *chg)
 	INIT_WORK(&chg->cp_status_change_work, smblib_cp_status_change_work);
 	INIT_WORK(&chg->batt_verify_update_work, smblib_batt_verify_update_work);
 	INIT_WORK(&chg->plugin_check_time_work, smblib_plugin_check_time_work);
+	INIT_DELAYED_WORK(&chg->dcin_aicl_delay_work, dcin_aicl_delay_work);
 	INIT_DELAYED_WORK(&chg->fake_plug_out_check_work, smblib_fake_plug_out_check_work);
 	INIT_DELAYED_WORK(&chg->clear_hdc_work, clear_hdc_work);
 	INIT_DELAYED_WORK(&chg->icl_change_work, smblib_icl_change_work);
@@ -12660,6 +12789,7 @@ int smblib_deinit(struct smb_charger *chg)
 		cancel_work_sync(&chg->cp_status_change_work);
 		cancel_work_sync(&chg->batt_verify_update_work);
 		cancel_work_sync(&chg->plugin_check_time_work);
+		cancel_delayed_work_sync(&chg->dcin_aicl_delay_work);
 		cancel_delayed_work_sync(&chg->fake_plug_out_check_work);
 		cancel_delayed_work_sync(&chg->clear_hdc_work);
 		cancel_delayed_work_sync(&chg->icl_change_work);

@@ -45,14 +45,15 @@ static HLIST_HEAD(clk_root_list);
 static HLIST_HEAD(clk_orphan_list);
 static LIST_HEAD(clk_notifier_list);
 
+static LIST_HEAD(clk_handoff_vdd_list);
+static bool vdd_class_handoff_completed;
+static DEFINE_MUTEX(vdd_class_list_lock);
+
 struct clk_handoff_vdd {
 	struct list_head list;
 	struct clk_vdd_class *vdd_class;
 };
 
-static LIST_HEAD(clk_handoff_vdd_list);
-static bool vdd_class_handoff_completed;
-static DEFINE_MUTEX(vdd_class_list_lock);
 /*
  * clk_rate_change_list is used during clk_core_set_rate_nolock() calls to
  * handle vdd_class vote tracking.  core->rate_change_node is added to
@@ -154,6 +155,8 @@ static void clk_pm_runtime_put(struct clk_core *core)
 /***           locking             ***/
 static void clk_prepare_lock(void)
 {
+	if (oops_in_progress)
+		return;
 	if (!mutex_trylock(&prepare_lock)) {
 		if (prepare_owner == current) {
 			prepare_refcnt++;
@@ -169,6 +172,8 @@ static void clk_prepare_lock(void)
 
 static void clk_prepare_unlock(void)
 {
+	if (oops_in_progress)
+		return;
 	WARN_ON_ONCE(prepare_owner != current);
 	WARN_ON_ONCE(prepare_refcnt == 0);
 
@@ -182,6 +187,9 @@ static unsigned long clk_enable_lock(void)
 	__acquires(enable_lock)
 {
 	unsigned long flags;
+
+	if (oops_in_progress)
+		return 1;
 
 	/*
 	 * On UP systems, spin_trylock_irqsave() always returns true, even if
@@ -209,6 +217,9 @@ static unsigned long clk_enable_lock(void)
 static void clk_enable_unlock(unsigned long flags)
 	__releases(enable_lock)
 {
+	if (oops_in_progress)
+		return;
+
 	WARN_ON_ONCE(enable_owner != current);
 	WARN_ON_ONCE(enable_refcnt == 0);
 

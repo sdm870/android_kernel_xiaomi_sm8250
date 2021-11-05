@@ -5368,6 +5368,10 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_KI_COEFF_CURRENT:
 		pval->intval = chip->dt.ffc_ki_coeff_med_hi_chg_thr_ma;
 		break;
+	case POWER_SUPPLY_PROP_HEALTH:
+		rc = power_supply_get_property(fg->batt_psy,
+					       POWER_SUPPLY_PROP_HEALTH, pval);
+		break;
 	default:
 		pr_debug("unsupported property %d\n", psp);
 		rc = -EINVAL;
@@ -5479,6 +5483,14 @@ static int fg_psy_set_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_SHUTDOWN_DELAY_ENABLE:
 		chip->dt.shutdown_delay_enable = pval->intval;
+		break;
+	case POWER_SUPPLY_PROP_HEALTH:
+		rc = power_supply_set_property(fg->batt_psy,
+					       POWER_SUPPLY_PROP_HEALTH, pval);
+		if (rc < 0) {
+			pr_err("Error in writing health, rc=%d\n", rc);
+			return rc;
+		}
 		break;
 #ifdef CONFIG_BATT_VERIFY_BY_DS28E16
 	case POWER_SUPPLY_PROP_AUTHENTIC:

@@ -48,10 +48,6 @@
 #include "../xiaomi/xiaomi_touch.h"
 #endif
 
-
-/*Lock down info size*/
-#define NVT_LOCKDOWN_SIZE			8
-
 #define PINCTRL_STATE_ACTIVE		"pmx_ts_active"
 #define PINCTRL_STATE_SUSPEND		"pmx_ts_suspend"
 #define PINCTRL_STATE_RELEASE		"pmx_ts_release"
@@ -152,8 +148,7 @@ struct nvt_ts_data {
 	struct spi_device *client;
 	struct platform_device *pdev;
 	struct input_dev *input_dev;
-	struct work_struct nvt_fwu_work;
-	struct work_struct nvt_lockdown_work;
+	struct delayed_work nvt_fwu_work;
 	struct work_struct switch_mode_work;
 
 	struct mutex power_supply_lock;
@@ -209,7 +204,6 @@ struct nvt_ts_data {
 	int db_wakeup;
 	bool lkdown_readed;
 	bool boot_firmware_updated;
-	u8 lockdown_info[NVT_LOCKDOWN_SIZE];
 	uint32_t config_array_size;
 	struct nvt_config_info *config_array;
 	int panel_index;

@@ -2056,6 +2056,7 @@ get_sk:
 			return sk;
 	}
 	spin_unlock(&ilb->lock);
+	cond_resched();
 	st->offset = 0;
 	if (++st->bucket < INET_LHTABLE_SIZE)
 		goto get_head;
@@ -2114,6 +2115,7 @@ static void *established_get_first(struct seq_file *seq)
 			goto out;
 		}
 		spin_unlock_bh(lock);
+		cond_resched();
 	}
 out:
 	return rc;
@@ -2177,6 +2179,7 @@ static void *tcp_get_idx(struct seq_file *seq, loff_t pos)
 static void *tcp_seek_last_pos(struct seq_file *seq)
 {
 	struct tcp_iter_state *st = seq->private;
+	int bucket = st->bucket;
 	int offset = st->offset;
 	int orig_num = st->num;
 	void *rc = NULL;
@@ -2187,7 +2190,7 @@ static void *tcp_seek_last_pos(struct seq_file *seq)
 			break;
 		st->state = TCP_SEQ_STATE_LISTENING;
 		rc = listening_get_next(seq, NULL);
-		while (offset-- && rc)
+		while (offset-- && rc && bucket == st->bucket)
 			rc = listening_get_next(seq, rc);
 		if (rc)
 			break;
@@ -2198,7 +2201,7 @@ static void *tcp_seek_last_pos(struct seq_file *seq)
 		if (st->bucket > tcp_hashinfo.ehash_mask)
 			break;
 		rc = established_get_first(seq);
-		while (offset-- && rc)
+		while (offset-- && rc && bucket == st->bucket)
 			rc = established_get_next(seq, rc);
 	}
 

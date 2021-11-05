@@ -555,9 +555,10 @@ static int qrtr_node_enqueue(struct qrtr_node *node, struct sk_buff *skb,
 	hdr->type = cpu_to_le32(type);
 	hdr->src_node_id = cpu_to_le32(from->sq_node);
 	hdr->src_port_id = cpu_to_le32(from->sq_port);
-	if (to->sq_node == QRTR_NODE_BCAST)
+	if (to->sq_node == QRTR_NODE_BCAST) {
 		hdr->dst_node_id = cpu_to_le32(node->nid);
-	else
+		hdr->dst_port_id = cpu_to_le32(QRTR_PORT_CTRL);
+	} else
 		hdr->dst_node_id = cpu_to_le32(to->sq_node);
 
 	hdr->dst_port_id = cpu_to_le32(to->sq_port);
@@ -769,7 +770,7 @@ int qrtr_endpoint_post(struct qrtr_endpoint *ep, const void *data, size_t len)
 	const struct qrtr_hdr_v2 *v2;
 	struct sk_buff *skb;
 	struct qrtr_cb *cb;
-	unsigned int size;
+	size_t size;
 	int errcode;
 	unsigned int ver;
 	size_t hdrlen;
@@ -836,7 +837,7 @@ int qrtr_endpoint_post(struct qrtr_endpoint *ep, const void *data, size_t len)
 	if (cb->dst_port == QRTR_PORT_CTRL_LEGACY)
 		cb->dst_port = QRTR_PORT_CTRL;
 
-	if (len != ALIGN(size, 4) + hdrlen)
+	if (!size || len != ALIGN(size, 4) + hdrlen)
 		goto err;
 
 	if (cb->dst_port != QRTR_PORT_CTRL && cb->type != QRTR_TYPE_DATA &&
@@ -1342,9 +1343,9 @@ static int qrtr_port_assign(struct qrtr_sock *ipc, int *port)
 		if (rc >= 0)
 			*port = rc;
 	} else if (*port < QRTR_MIN_EPH_SOCKET &&
-			!(capable(CAP_NET_ADMIN) ||
-				in_egroup_p(AID_VENDOR_QRTR) ||
-				in_egroup_p(GLOBAL_ROOT_GID))) {
+		   !(capable(CAP_NET_ADMIN) ||
+		   in_egroup_p(AID_VENDOR_QRTR) ||
+		   in_egroup_p(GLOBAL_ROOT_GID))) {
 		rc = -EACCES;
 	} else if (*port == QRTR_PORT_CTRL) {
 		rc = idr_alloc(&qrtr_ports, ipc, 0, 1, GFP_ATOMIC);
@@ -1601,12 +1602,12 @@ static int qrtr_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 			release_sock(sk);
 			return -ECONNRESET;
 		}
-		enqueue_fn = qrtr_node_enqueue;
 
 		if (ipc->state > QRTR_STATE_INIT && ipc->state != node->nid)
 			ipc->state = QRTR_STATE_MULTI;
 		else if (ipc->state == QRTR_STATE_INIT)
 			ipc->state = node->nid;
+		enqueue_fn = qrtr_node_enqueue;
 	}
 
 	plen = (len + 3) & ~3;

@@ -40,7 +40,6 @@ MODULE_DESCRIPTION("Generic thermal management sysfs support");
 MODULE_LICENSE("GPL v2");
 
 #define THERMAL_MAX_ACTIVE	16
-#define CPU_LIMITS_PARAM_NUM	2
 
 static DEFINE_IDA(thermal_tz_ida);
 static DEFINE_IDA(thermal_cdev_ida);
@@ -263,15 +262,14 @@ int thermal_build_list_of_policies(char *buf)
 {
 	struct thermal_governor *pos;
 	ssize_t count = 0;
-	ssize_t size = PAGE_SIZE;
 
 	mutex_lock(&thermal_governor_lock);
 
 	list_for_each_entry(pos, &thermal_governor_list, governor_list) {
-		size = PAGE_SIZE - count;
-		count += scnprintf(buf + count, size, "%s ", pos->name);
+		count += scnprintf(buf + count, PAGE_SIZE - count, "%s ",
+				   pos->name);
 	}
-	count += scnprintf(buf + count, size, "\n");
+	count += scnprintf(buf + count, PAGE_SIZE - count, "\n");
 
 	mutex_unlock(&thermal_governor_lock);
 
@@ -504,7 +502,12 @@ static void update_temperature(struct thermal_zone_device *tz)
 static void thermal_zone_device_init(struct thermal_zone_device *tz)
 {
 	struct thermal_instance *pos;
-	tz->temperature = THERMAL_TEMP_INVALID;
+
+	if (tz->tzp && tz->tzp->tracks_low)
+		tz->temperature = THERMAL_TEMP_INVALID_LOW;
+	else
+		tz->temperature = THERMAL_TEMP_INVALID;
+
 	list_for_each_entry(pos, &tz->thermal_instances, tz_node)
 		pos->initialized = false;
 }
@@ -519,6 +522,9 @@ void thermal_zone_device_update_temp(struct thermal_zone_device *tz,
 				enum thermal_notify_event event, int temp)
 {
 	int count;
+
+	if (!tz || !tz->ops)
+		return;
 
 	if (atomic_read(&in_suspend) && (!tz->ops->is_wakeable ||
 		!(tz->ops->is_wakeable(tz))))
@@ -540,6 +546,9 @@ void thermal_zone_device_update(struct thermal_zone_device *tz,
 				enum thermal_notify_event event)
 {
 	int count;
+
+	if (!tz || !tz->ops)
+		return;
 
 	if (atomic_read(&in_suspend) && (!tz->ops->is_wakeable ||
 		!(tz->ops->is_wakeable(tz))))
@@ -1455,7 +1464,7 @@ free_tz:
 EXPORT_SYMBOL_GPL(thermal_zone_device_register);
 
 /**
- * thermal_zone_device_unregister - removes the registered thermal zone device
+ * thermal_device_unregister - removes the registered thermal zone device
  * @tz: the thermal zone device to remove
  */
 void thermal_zone_device_unregister(struct thermal_zone_device *tz)
@@ -1692,6 +1701,7 @@ static int thermal_pm_notify(struct notifier_block *nb,
 			     unsigned long mode, void *_unused)
 {
 	struct thermal_zone_device *tz;
+	enum thermal_device_mode tz_mode;
 
 	switch (mode) {
 	case PM_HIBERNATION_PREPARE:
@@ -1704,9 +1714,15 @@ static int thermal_pm_notify(struct notifier_block *nb,
 	case PM_POST_SUSPEND:
 		atomic_set(&in_suspend, 0);
 		list_for_each_entry(tz, &thermal_tz_list, node) {
-			if (tz->ops->is_wakeable &&
-				tz->ops->is_wakeable(tz))
+			tz_mode = THERMAL_DEVICE_ENABLED;
+			if (tz->ops->get_mode)
+				tz->ops->get_mode(tz, &tz_mode);
+
+			if ((tz->ops->is_wakeable &&
+				tz->ops->is_wakeable(tz)) ||
+				tz_mode == THERMAL_DEVICE_DISABLED)
 				continue;
+
 			thermal_zone_device_init(tz);
 			thermal_zone_device_update(tz,
 						   THERMAL_EVENT_UNSPECIFIED);
@@ -1821,33 +1837,6 @@ static DEVICE_ATTR(temp_state, 0664,
 		   thermal_temp_state_show, thermal_temp_state_store);
 
 static ssize_t
-cpu_limits_show(struct device *dev,
-				      struct device_attribute *attr, char *buf)
-{
-	return 0;
-}
-
-static ssize_t
-cpu_limits_store(struct device *dev,
-				      struct device_attribute *attr, const char *buf, size_t len)
-{
-	unsigned int cpu;
-	unsigned int max;
-
-	if (sscanf(buf, "cpu%u %u", &cpu, &max) != CPU_LIMITS_PARAM_NUM) {
-		pr_err("input param error, can not prase param\n");
-		return -EINVAL;
-	}
-
-	cpu_limits_set_level(cpu, max);
-
-	return len;
-}
-
-static DEVICE_ATTR(cpu_limits, 0664,
-		   cpu_limits_show, cpu_limits_store);
-
-static ssize_t
 thermal_board_sensor_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1937,10 +1926,6 @@ static int create_thermal_message_node(void)
 		if (ret < 0)
 			pr_warn("Thermal: create temp state node failed\n");
 
-		ret = sysfs_create_file(&thermal_message_dev.kobj, &dev_attr_cpu_limits.attr);
-		if (ret < 0)
-			pr_warn("Thermal: create cpu limits node failed\n");
-
 		ret = sysfs_create_file(&thermal_message_dev.kobj, &dev_attr_board_sensor.attr);
 		if (ret < 0)
 			pr_warn("Thermal: create board sensor node failed\n");
@@ -1964,7 +1949,6 @@ static void destroy_thermal_message_node(void)
 {
 	sysfs_remove_file(&thermal_message_dev.kobj, &dev_attr_board_sensor_temp.attr);
 	sysfs_remove_file(&thermal_message_dev.kobj, &dev_attr_board_sensor.attr);
-	sysfs_remove_file(&thermal_message_dev.kobj, &dev_attr_cpu_limits.attr);
 	sysfs_remove_file(&thermal_message_dev.kobj, &dev_attr_temp_state.attr);
 	sysfs_remove_file(&thermal_message_dev.kobj, &dev_attr_boost.attr);
 	sysfs_remove_file(&thermal_message_dev.kobj, &dev_attr_sconfig.attr);

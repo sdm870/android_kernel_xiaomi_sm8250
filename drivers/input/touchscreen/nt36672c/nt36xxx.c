@@ -68,7 +68,6 @@ struct nvt_ts_data *ts;
 
 #if BOOT_UPDATE_FIRMWARE
 static struct workqueue_struct *nvt_fwu_wq;
-static struct workqueue_struct *nvt_lockdown_wq;
 extern void Boot_Update_Firmware(struct work_struct *work);
 #endif
 
@@ -83,7 +82,6 @@ static void nvt_ts_late_resume(struct early_suspend *h);
 #endif
 static int32_t nvt_ts_suspend(struct device *dev);
 static int32_t nvt_ts_resume(struct device *dev);
-extern int dsi_panel_lockdown_info_read(unsigned char *plockdowninfo);
 extern void dsi_panel_doubleclick_enable(bool on);
 static int32_t nvt_check_palm(uint8_t input_id, uint8_t *data);
 #if XIAOMI_ROI
@@ -118,40 +116,6 @@ const uint16_t gesture_key_array[] = {
 	KEY_POWER,  //GESTURE_SLIDE_RIGHT
 };
 #endif
-
-static ssize_t nvt_cg_color_show(struct device *dev,
-				    struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%c\n", ts->lockdown_info[2]);
-}
-
-static ssize_t nvt_cg_maker_show(struct device *dev,
-				    struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%c\n", ts->lockdown_info[6]);
-}
-
-static ssize_t nvt_display_maker_show(struct device *dev,
-				    struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%c\n", ts->lockdown_info[1]);
-}
-
-
-
-
-static DEVICE_ATTR(cg_color, (S_IRUGO), nvt_cg_color_show, NULL);
-static DEVICE_ATTR(cg_maker, (S_IRUGO), nvt_cg_maker_show, NULL);
-static DEVICE_ATTR(display_maker, (S_IRUGO), nvt_display_maker_show, NULL);
-
-
-
-struct attribute *nvt_panel_attr[] = {
-	&dev_attr_cg_color.attr,
-	&dev_attr_cg_maker.attr,
-	&dev_attr_display_maker.attr,
-	NULL,
-};
 
 static uint8_t bTouchIsAwake = 0;
 /*******************************************************
@@ -1143,20 +1107,6 @@ static int32_t nvt_parse_dt(struct device *dev)
 }
 #endif
 
-bool is_lockdown_empty(u8 *lockdown)
-{
-	bool ret = true;
-	int i;
-	for (i = 0; i < NVT_LOCKDOWN_SIZE; i++) {
-		if (lockdown[i] != 0) {
-			ret = false;
-			break;
-		}
-	}
-
-	return ret;
-}
-
 void nvt_match_fw(void)
 {
 	NVT_LOG("start match fw name");
@@ -1953,76 +1903,6 @@ static int nvt_read_partial_diffdata(struct xiaomi_diff_data *mi_diff_data)
 }
 #endif
 
-static char nvt_touch_vendor_read(void)
-{
-	char value = '4';
-	NVT_LOG("%s Get touch vendor: %c\n", __func__, value);
-	return value;
-}
-
-static u8 nvt_panel_vendor_read(void)
-{
-	char value = '0';
-	int ret = 0;
-	if (!ts)
-		return value;
-	ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
-	if (ret <= 0) {
-		NVT_ERR("can't get lockdown info");
-		return value;
-	}
-	if (!ts->lockdown_info[6]) {
-		NVT_ERR("%s lockdown info is NULL\n", __func__);
-		return value;
-	} else {
-		value = ts->lockdown_info[1];
-		NVT_LOG("%s Get panel vendor: %d\n", __func__, value);
-	}
-	return value;
-}
-
-static u8 nvt_panel_color_read(void)
-{
-	char value = '0';
-	int ret = 0;
-	if (!ts)
-		return value;
-	ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
-	if (ret <= 0) {
-		NVT_ERR("can't get lockdown info");
-		return value;
-	}
-	if (!ts->lockdown_info[2]) {
-		NVT_ERR("%s lockdown info is NULL\n", __func__);
-		return value;
-	} else {
-		value = ts->lockdown_info[2];
-		NVT_LOG("%s Get panel color: %d\n", __func__, value);
-	}
-	return value;
-}
-
-static u8 nvt_panel_display_read(void)
-{
-	char value = '0';
-	int ret = 0;
-	if (!ts)
-		return value;
-	ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
-	if (ret <= 0) {
-		NVT_ERR("can't get lockdown info");
-		return value;
-	}
-	if (!ts->lockdown_info[1]) {
-		NVT_ERR("%s lockdown info is NULL\n", __func__);
-		return value;
-	} else {
-		value = ts->lockdown_info[1];
-		NVT_LOG("%s Get panel display: %d\n", __func__, value);
-	}
-	return value;
-}
-
 static int nvt_get_mode_value(int mode, int value_type)
 {
 	int value = -1;
@@ -2243,37 +2123,6 @@ static void nvt_resume_work(struct work_struct *work)
 	struct nvt_ts_data *ts_core = container_of(work, struct nvt_ts_data, resume_work);
 	nvt_ts_resume(&ts_core->client->dev);
 }
-static void get_lockdown_info(struct work_struct *work)
-{
-	int ret = 0;
-	int retry = 3;
-
-	NVT_LOG("lkdown_readed = %d", ts->lkdown_readed);
-	while (retry-- && !ts->lkdown_readed) {
-		ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
-		if (ret < 0) {
-			NVT_ERR("can't get lockdown info");
-		} else {
-			NVT_LOG("Lockdown:0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x\n",
-			ts->lockdown_info[0], ts->lockdown_info[1], ts->lockdown_info[2], ts->lockdown_info[3],
-			ts->lockdown_info[4], ts->lockdown_info[5], ts->lockdown_info[6], ts->lockdown_info[7]);
-			ts->lkdown_readed = true;
-			NVT_LOG("READ LOCKDOWN!!!");
-		}
-	}
-
-	if (ts->lkdown_readed) {
-		NVT_LOG("use lockdown info that readed");
-		NVT_LOG("Lockdown:0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x\n",
-			ts->lockdown_info[0], ts->lockdown_info[1], ts->lockdown_info[2], ts->lockdown_info[3],
-			ts->lockdown_info[4], ts->lockdown_info[5], ts->lockdown_info[6], ts->lockdown_info[7]);
-		if (!ts->boot_firmware_updated) {
-			queue_work(nvt_fwu_wq, &ts->nvt_fwu_work);
-		}
-	} else {
-		NVT_LOG("get lockdown info ERROR!!");
-	}
-}
 
 static int nvt_power_supply_event(struct notifier_block *nb,
 				  unsigned long event, void *ptr)
@@ -2333,7 +2182,6 @@ static int32_t nvt_ts_probe(struct platform_device *pdev)
 #if ((TOUCH_KEY_NUM > 0) || WAKEUP_GESTURE)
 	int32_t retry = 0;
 #endif
-	struct attribute_group *attrs_p = NULL;
 
 	NVT_LOG("start\n");
 
@@ -2546,13 +2394,6 @@ static int32_t nvt_ts_probe(struct platform_device *pdev)
 
 	INIT_WORK(&ts->switch_mode_work, nvt_switch_mode_work);
 
-	nvt_lockdown_wq = alloc_workqueue("nvt_lockdown_wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
-	if (!nvt_lockdown_wq) {
-		NVT_ERR("nvt_fwu_wq create workqueue failed\n");
-		ret = -ENOMEM;
-		goto err_create_nvt_lockdown_wq_failed;
-	}
-	INIT_WORK(&ts->nvt_lockdown_work, get_lockdown_info);
 #if WAKEUP_GESTURE
 	device_init_wakeup(&ts->input_dev->dev, 1);
 #endif
@@ -2568,9 +2409,10 @@ static int32_t nvt_ts_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto err_create_nvt_fwu_wq_failed;
 	}
-	INIT_WORK(&ts->nvt_fwu_work, Boot_Update_Firmware);
+	INIT_DELAYED_WORK(&ts->nvt_fwu_work, Boot_Update_Firmware);
+	// please make sure boot update start after display reset(RESX) sequence
+	queue_delayed_work(nvt_fwu_wq, &ts->nvt_fwu_work, msecs_to_jiffies(14000));
 #endif
-	queue_work(nvt_lockdown_wq, &ts->nvt_lockdown_work);
 
 	NVT_LOG("NVT_TOUCH_ESD_PROTECT is %d\n", NVT_TOUCH_ESD_PROTECT);
 #if NVT_TOUCH_ESD_PROTECT
@@ -2618,15 +2460,6 @@ static int32_t nvt_ts_probe(struct platform_device *pdev)
 #endif
 
 #endif
-	attrs_p = (struct attribute_group *)devm_kzalloc(&pdev->dev, sizeof(*attrs_p), GFP_KERNEL);
-	if (!attrs_p) {
-		NVT_ERR("no mem to alloc");
-		goto err_mp_proc_init_failed;
-	}
-	ts->attrs = attrs_p;
-	attrs_p->name = "panel_info";
-	attrs_p->attrs = nvt_panel_attr;
-	ret = sysfs_create_group(&pdev->dev.kobj, ts->attrs);
 
 	ts->event_wq = alloc_workqueue("nvt-event-queue",
 		WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE, 1);
@@ -2683,10 +2516,6 @@ static int32_t nvt_ts_probe(struct platform_device *pdev)
 	}
 #endif
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
-			xiaomi_touch_interfaces.touch_vendor_read = nvt_touch_vendor_read;
-			xiaomi_touch_interfaces.panel_display_read = nvt_panel_display_read;
-			xiaomi_touch_interfaces.panel_vendor_read = nvt_panel_vendor_read;
-			xiaomi_touch_interfaces.panel_color_read = nvt_panel_color_read;
 			xiaomi_touch_interfaces.getModeValue = nvt_get_mode_value;
 			xiaomi_touch_interfaces.setModeValue = nvt_set_cur_value;
 			xiaomi_touch_interfaces.resetMode = nvt_reset_mode;
@@ -2747,22 +2576,16 @@ err_create_nvt_esd_check_wq_failed:
 #endif
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
-		cancel_work_sync(&ts->nvt_fwu_work);
+		cancel_delayed_work_sync(&ts->nvt_fwu_work);
 		destroy_workqueue(nvt_fwu_wq);
 		nvt_fwu_wq = NULL;
 	}
 err_create_nvt_fwu_wq_failed:
-	if (nvt_lockdown_wq) {
-		cancel_work_sync(&ts->nvt_lockdown_work);
-		destroy_workqueue(nvt_lockdown_wq);
-		nvt_lockdown_wq = NULL;
-	}
-#endif
-err_create_nvt_lockdown_wq_failed:
 #if WAKEUP_GESTURE
 	device_init_wakeup(&ts->input_dev->dev, 0);
 #endif
 	free_irq(ts->client->irq, ts);
+#endif
 err_int_request_failed:
 	input_unregister_device(ts->input_dev);
 	ts->input_dev = NULL;
@@ -2842,7 +2665,7 @@ static int32_t nvt_ts_remove(struct platform_device *pdev)
 
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
-		cancel_work_sync(&ts->nvt_fwu_work);
+		cancel_delayed_work_sync(&ts->nvt_fwu_work);
 		destroy_workqueue(nvt_fwu_wq);
 		nvt_fwu_wq = NULL;
 	}
@@ -2918,6 +2741,14 @@ static void nvt_ts_shutdown(struct platform_device *pdev)
 		nvt_esd_check_wq = NULL;
 	}
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
+
+#if BOOT_UPDATE_FIRMWARE
+	if (nvt_fwu_wq) {
+		cancel_delayed_work_sync(&ts->nvt_fwu_work);
+		destroy_workqueue(nvt_fwu_wq);
+		nvt_fwu_wq = NULL;
+	}
+#endif
 
 #if WAKEUP_GESTURE
 	device_init_wakeup(&ts->input_dev->dev, 0);

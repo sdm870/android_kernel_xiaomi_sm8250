@@ -106,9 +106,7 @@ static int _block2mtd_erase(struct block2mtd_dev *dev, loff_t to, size_t len)
 				lock_page(page);
 				memset(page_address(page), 0xff, PAGE_SIZE);
 				set_page_dirty(page);
-				write_one_page(page);
-				/* write_one_page will unlock page on return */
-				//unlock_page(page);
+				unlock_page(page);
 				balance_dirty_pages_ratelimited(mapping);
 				break;
 			}
@@ -353,7 +351,7 @@ int do_io(int cmd, struct block_device *bdev,  const u_char *buf, u32 len, u64 o
 	scmd->cmnd = cdb;
 	scmd->cmd_len = cdb_len;
 	scmd->sdb.length = len;
-	scmd->sdb.resid = 0;
+	scmd->req.resid_len = 0;
 	scmd->sdb.table.nents = nr_pages;
 	scmd->sdb.table.orig_nents = nr_pages;
 

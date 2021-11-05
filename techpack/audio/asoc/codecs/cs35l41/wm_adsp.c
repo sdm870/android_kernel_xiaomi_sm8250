@@ -499,8 +499,8 @@ static void wm_adsp_buf_free(struct list_head *list)
 #define WM_ADSP_FW_ASR      7
 #define WM_ADSP_FW_TRACE    8
 #define WM_ADSP_FW_SPK_PROT 9
-#define WM_ADSP_FW_DIAG     10
-#define WM_ADSP_FW_CALIB    11
+#define WM_ADSP_FW_SPK_CALI 10
+#define WM_ADSP_FW_SPK_DIAG 11
 #define WM_ADSP_FW_MISC     12
 
 #define WM_ADSP_NUM_FW      13
@@ -533,8 +533,8 @@ static const char *wm_adsp_fw_text[WM_ADSP_NUM_FW] = {
 	[WM_ADSP_FW_ASR] =      "ASR Assist",
 	[WM_ADSP_FW_TRACE] =    "Dbg Trace",
 	[WM_ADSP_FW_SPK_PROT] = "Protection",
-	[WM_ADSP_FW_DIAG] =     "Diag",
-	[WM_ADSP_FW_CALIB] =     "Diag Z",
+	[WM_ADSP_FW_SPK_CALI] = "Calibration",
+	[WM_ADSP_FW_SPK_DIAG] = "Diagnostic",
 	[WM_ADSP_FW_MISC] =     "Misc",
 };
 
@@ -742,8 +742,8 @@ static struct wm_adsp_fw_defs wm_adsp_fw[WM_ADSP_NUM_FW] = {
 		.caps = trace_caps,
 	},
 	[WM_ADSP_FW_SPK_PROT] = { .file = "spk-prot" },
-	[WM_ADSP_FW_DIAG] =     { .file = "diag" },
-	[WM_ADSP_FW_CALIB] =     { .file = "diag-z" },
+	[WM_ADSP_FW_SPK_CALI] = { .file = "spk-cali" },
+	[WM_ADSP_FW_SPK_DIAG] = { .file = "spk-diag" },
 	[WM_ADSP_FW_MISC] =     { .file = "misc" },
 };
 
@@ -807,7 +807,6 @@ static const char *wm_adsp_mem_region_name(unsigned int type)
 }
 static int wm_halo_apply_calibration(struct snd_soc_dapm_widget *w);
 static int wm_adsp_k_ctl_put(struct wm_adsp *dsp, const char *name, int value);
-static int wm_adsp_k_ctl_get(struct wm_adsp *dsp, const char *name);
 
 #ifdef CONFIG_DEBUG_FS
 static void wm_adsp_debugfs_save_wmfwname(struct wm_adsp *dsp, const char *s)
@@ -4350,24 +4349,7 @@ static int wm_coeff_k_put(struct snd_kcontrol *kctl,
 
 	return ret;
 }
-static int wm_coeff_k_get(struct snd_kcontrol *kctl,
-			struct snd_ctl_elem_value *ucontrol)
-{
-	struct soc_bytes_ext *bytes_ext =
-		(struct soc_bytes_ext *)kctl->private_value;
-	struct wm_coeff_ctl *ctl = bytes_ext_to_ctl(bytes_ext);
-	char *p = ucontrol->value.bytes.data;
-	int ret = 0;
 
-	if (ctl->flags & WMFW_CTL_FLAG_VOLATILE) {
-		ret = wm_coeff_read_control(ctl, p, ctl->len);
-	} else {
-		ret = wm_coeff_read_control(ctl, ctl->cache, ctl->len);
-		memcpy(p, ctl->cache, ctl->len);
-	}
-
-	return ret;
-}
 static int wm_adsp_k_ctl_put(struct wm_adsp *dsp, const char *name, int value)
 {
 	struct snd_kcontrol *kctl = NULL;
@@ -4388,29 +4370,6 @@ static int wm_adsp_k_ctl_put(struct wm_adsp *dsp, const char *name, int value)
 	return 0;
 }
 
-static int wm_adsp_k_ctl_get(struct wm_adsp *dsp, const char *name)
-{
-	struct snd_kcontrol *kctl = NULL;
-	struct snd_ctl_elem_value ucontrol;
-	struct snd_soc_card *card = dsp->component->card;
-
-	int value = 0;
-
-	kctl = snd_soc_card_get_kcontrol(card, name);
-	if (kctl == NULL) {
-		adsp_warn(dsp, "%s: %s isn't found\n", __func__, name);
-		return -1;
-	}
-
-	wm_coeff_k_get(kctl, &ucontrol);
-	memcpy((char *)&value, (char *)ucontrol.value.bytes.data, sizeof(value));
-	value = be32_to_cpu(value);
-
-	adsp_dbg(dsp, "%s: %s:0x%x\n", __func__, kctl->id.name, value);
-
-	return 0;
-}
-
 static int wm_halo_apply_calibration(struct snd_soc_dapm_widget *w)
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
@@ -4418,14 +4377,21 @@ static int wm_halo_apply_calibration(struct snd_soc_dapm_widget *w)
 	struct wm_adsp *dsp = &dsps[w->shift];
 
 	switch(dsp->fw) {
-		case WM_ADSP_FW_CALIB:
+		case WM_ADSP_FW_SPK_CALI:
 			adsp_warn(dsp, "Set ambient %d, only for Z Diagnostic\n", dsp->ambient);
-			if (dsp->component->name_prefix)
-				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Diag Z cd CAL_AMBIENT", dsp->ambient);
-			else
-				wm_adsp_k_ctl_put(dsp, "DSP1X Diag Z cd CAL_AMBIENT", dsp->ambient);
+			if (dsp->component->name_prefix) {
+				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_R", dsp->cal_z);
+				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_STATUS", dsp->cal_status);
+				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_CHECKSUM", dsp->cal_chksum);
+				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_AMBIENT", dsp->ambient);
+			} else {
+				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_R", dsp->cal_z);
+				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_STATUS", dsp->cal_status);
+				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_CHECKSUM", dsp->cal_chksum);
+				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_AMBIENT", dsp->ambient);
+			}
 			break;
-		case WM_ADSP_FW_DIAG:
+		case WM_ADSP_FW_SPK_DIAG:
 			adsp_warn(dsp, "Set ambient %d, only for Diagnostic\n", dsp->ambient);
 			if (dsp->component->name_prefix)
 				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Diag cd CAL_AMBIENT", dsp->ambient);
@@ -4437,25 +4403,12 @@ static int wm_halo_apply_calibration(struct snd_soc_dapm_widget *w)
 				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_R", dsp->cal_z);
 				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_STATUS", dsp->cal_status);
 				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_CHECKSUM", dsp->cal_chksum);
-				//hold time = 0x96
-				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection 400a4 OFFSET_HOLD_TIME", 150);
-				wm_adsp_k_ctl_get(dsp, "RCV DSP1X Protection cd CAL_R");
-				wm_adsp_k_ctl_get(dsp, "RCV DSP1X Protection cd CAL_STATUS");
-				wm_adsp_k_ctl_get(dsp, "RCV DSP1X Protection cd CAL_CHECKSUM");
-				//for ultrasonic
-#if defined(CONFIG_TARGET_PRODUCT_APOLLO) || defined(CONFIG_TARGET_PRODUCT_CAS) || defined (CONFIG_TARGET_PRODUCT_ALIOTH)
-				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection 400a4 E_FULL_US_BYPASS", 1);
-				wm_adsp_k_ctl_get(dsp, "RCV DSP1X Protection 400a4 E_FULL_US_BYPASS");
-#endif
+				wm_adsp_k_ctl_put(dsp, "RCV DSP1X Protection cd CAL_AMBIENT", dsp->ambient);
 			} else {
 				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_R", dsp->cal_z);
 				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_STATUS", dsp->cal_status);
 				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_CHECKSUM", dsp->cal_chksum);
-				//hold time = 0x96
-				wm_adsp_k_ctl_put(dsp, "DSP1X Protection 400a4 OFFSET_HOLD_TIME", 150);
-				wm_adsp_k_ctl_get(dsp, "DSP1X Protection cd CAL_R");
-				wm_adsp_k_ctl_get(dsp, "DSP1X Protection cd CAL_STATUS");
-				wm_adsp_k_ctl_get(dsp, "DSP1X Protection cd CAL_CHECKSUM");
+				wm_adsp_k_ctl_put(dsp, "DSP1X Protection cd CAL_AMBIENT", dsp->ambient);
 			}
 			break;
 		default:

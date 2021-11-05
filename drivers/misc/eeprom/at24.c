@@ -25,6 +25,7 @@
 #include <linux/platform_data/at24.h>
 #include <linux/pm_runtime.h>
 #include <linux/gpio/consumer.h>
+#include "../../power/supply/google/google_bms.h"
 
 /*
  * I2C EEPROMs from most vendors are inexpensive and mostly interchangeable.
@@ -78,6 +79,8 @@ struct at24_data {
 
 	struct gpio_desc *wp_gpio;
 
+	struct delayed_work init_work;
+
 	/*
 	 * Some chips tie up multiple I2C addresses; dummy devices reserve
 	 * them for us, and we'll use them with SMBus calls.
@@ -120,6 +123,7 @@ struct at24_chip_data {
 		.byte_len = _len, .flags = _flags,			\
 	}
 
+AT24_CHIP_DATA(m24c08, 8192 / 8, 0);
 /* needs 8 addresses as A0-A2 are ignored */
 AT24_CHIP_DATA(at24_data_24c00, 128 / 8, AT24_FLAG_TAKE8ADDR);
 /* old variants can't be handled with this generic entry! */
@@ -161,6 +165,7 @@ AT24_CHIP_DATA(at24_data_24c2048, 2097152 / 8, AT24_FLAG_ADDR16);
 AT24_CHIP_DATA(at24_data_INT3499, 8192 / 8, 0);
 
 static const struct i2c_device_id at24_ids[] = {
+	{ "m24c08",	(kernel_ulong_t)&m24c08 },
 	{ "24c00",	(kernel_ulong_t)&at24_data_24c00 },
 	{ "24c01",	(kernel_ulong_t)&at24_data_24c01 },
 	{ "24cs01",	(kernel_ulong_t)&at24_data_24cs01 },
@@ -190,6 +195,7 @@ static const struct i2c_device_id at24_ids[] = {
 MODULE_DEVICE_TABLE(i2c, at24_ids);
 
 static const struct of_device_id at24_of_match[] = {
+	{ .compatible = "stchip,m24c08",	.data = &m24c08 },
 	{ .compatible = "atmel,24c00",		.data = &at24_data_24c00 },
 	{ .compatible = "atmel,24c01",		.data = &at24_data_24c01 },
 	{ .compatible = "atmel,24cs01",		.data = &at24_data_24cs01 },
@@ -615,6 +621,225 @@ static unsigned int at24_get_offset_adj(u8 flags, unsigned int byte_len)
 	}
 }
 
+#define BATT_TOTAL_HIST_LEN	928
+#define BATT_ONE_HIST_LEN	28
+#define BATT_MAX_HIST_CNT	\
+		(BATT_TOTAL_HIST_LEN / BATT_ONE_HIST_LEN) // 33.14
+
+#define BATT_EEPROM_TAG_MINF_OFFSET	0x00
+#define BATT_EEPROM_TAG_MINF_LEN	32
+#define BATT_EEPROM_TAG_DINF_OFFSET	0x20
+#define BATT_EEPROM_TAG_DINF_LEN	GBMS_DINF_LEN
+#define BATT_EEPROM_TAG_HIST_OFFSET	0x60
+#define BATT_EEPROM_TAG_HIST_LEN	BATT_ONE_HIST_LEN
+#define BATT_EEPROM_TAG_BGPN_OFFSET	0x03
+#define BATT_EEPROM_TAG_BGPN_LEN	GBMS_BGPN_LEN
+static int at24_storage_info(gbms_tag_t tag, size_t *addr, size_t *count,
+			     void *ptr)
+{
+	int ret = 0;
+
+	switch (tag) {
+	case GBMS_TAG_MINF:
+		*addr = BATT_EEPROM_TAG_MINF_OFFSET;
+		*count = BATT_EEPROM_TAG_MINF_LEN;
+		break;
+	case GBMS_TAG_DINF:
+		*addr = BATT_EEPROM_TAG_DINF_OFFSET;
+		*count = BATT_EEPROM_TAG_DINF_LEN;
+		break;
+	case GBMS_TAG_HIST:
+		*addr = BATT_EEPROM_TAG_HIST_OFFSET;
+		*count = BATT_EEPROM_TAG_HIST_LEN;
+		break;
+	case GBMS_TAG_BGPN:
+		*addr = BATT_EEPROM_TAG_BGPN_OFFSET;
+		*count = BATT_EEPROM_TAG_BGPN_LEN;
+		break;
+	default:
+		ret = -ENOENT;
+		break;
+	}
+
+	return ret;
+}
+
+static int at24_storage_iter(int index, gbms_tag_t *tag, void *ptr)
+{
+	static gbms_tag_t keys[] = { GBMS_TAG_BGPN, GBMS_TAG_MINF, GBMS_TAG_DINF, GBMS_TAG_HIST };
+	const int count = ARRAY_SIZE(keys);
+
+	if (index >= 0 && index < count)
+		*tag = keys[index];
+	else
+		return -ENOENT;
+
+	return 0;
+}
+
+static int at24_storage_read(gbms_tag_t tag, void *buff, size_t size,
+			     void *ptr)
+{
+	struct at24_data *chip = (struct at24_data *)ptr;
+	size_t offset = 0, len = 0;
+	int ret;
+
+	ret = at24_storage_info(tag, &offset, &len, ptr);
+
+	if (ret < 0)
+		return ret;
+
+	if (len > size)
+		return -ENOMEM;
+
+	ret = nvmem_device_read(chip->nvmem, offset, len, buff);
+	if (ret == 0)
+		ret = len;
+
+	return ret;
+}
+
+static int at24_storage_write(gbms_tag_t tag, const void *buff, size_t size,
+			      void *ptr)
+{
+	struct at24_data *chip = (struct at24_data *)ptr;
+	size_t offset = 0, len = 0;
+	int ret;
+
+	switch (tag) {
+	case GBMS_TAG_DINF:
+		ret = at24_storage_info(tag, &offset, &len, ptr);
+		break;
+	default:
+		ret = -ENOENT;
+		break;
+	}
+
+	if (ret < 0)
+		return ret;
+
+	if (size > len)
+		return -ENOMEM;
+
+	ret = nvmem_device_write(chip->nvmem, offset, size, (void *)buff);
+	if (ret == 0)
+		ret = size;
+
+	return ret;
+}
+
+static int at24_storage_read_data(gbms_tag_t tag, void *data, size_t count,
+				  int idx, void *ptr)
+{
+	struct at24_data *chip = (struct at24_data *)ptr;
+	size_t offset = 0, len = 0;
+	int ret;
+
+	switch (tag) {
+	case GBMS_TAG_HIST:
+		ret = at24_storage_info(tag, &offset, &len, ptr);
+		break;
+	default:
+		ret = -ENOENT;
+		break;
+	}
+
+	if (ret < 0)
+		return ret;
+
+	if (!data || !count) {
+		if (idx == GBMS_STORAGE_INDEX_INVALID)
+			return 0;
+		else
+			return BATT_MAX_HIST_CNT;
+	}
+
+	if (idx < 0)
+		return -EINVAL;
+
+	/* index == 0 is ok here */
+	if (idx >= BATT_MAX_HIST_CNT)
+		return -ENODATA;
+
+	if (len > count)
+		return -EINVAL;
+
+	offset += len * idx;
+
+	ret = nvmem_device_read(chip->nvmem, offset, len, data);
+	if (ret == 0)
+		ret = len;
+
+	return ret;
+}
+
+static int at24_storage_write_data(gbms_tag_t tag, const void *data,
+				   size_t count, int idx, void *ptr)
+{
+	struct at24_data *chip = (struct at24_data *)ptr;
+	size_t offset = 0, len = 0;
+	int ret;
+
+	switch (tag) {
+	case GBMS_TAG_HIST:
+		ret = at24_storage_info(tag, &offset, &len, ptr);
+		break;
+	default:
+		ret = -ENOENT;
+		break;
+	}
+
+	if (ret < 0)
+		return ret;
+
+	if (idx < 0 || !data || !count)
+		return -EINVAL;
+
+	/* index == 0 is ok here */
+	if (idx >= BATT_MAX_HIST_CNT)
+		return -ENODATA;
+
+	if (count > len)
+		return -EINVAL;
+
+	offset += len * idx;
+
+	ret = nvmem_device_write(chip->nvmem, offset, len, (void *)data);
+	if (ret == 0)
+		ret = len;
+
+	return ret;
+}
+
+
+static struct gbms_storage_desc at24_storage_dsc = {
+	.info = at24_storage_info,
+	.iter = at24_storage_iter,
+	.read = at24_storage_read,
+	.write = at24_storage_write,
+	.read_data = at24_storage_read_data,
+	.write_data = at24_storage_write_data,
+};
+
+#define AT24_DELAY_INIT_MS	100
+static void at24_init_work(struct work_struct *work)
+{
+	struct at24_data *chip = container_of(work, struct at24_data,
+					      init_work.work);
+	struct device *dev = at24_base_client_dev(chip);
+	int ret = 0;
+
+	ret = gbms_storage_register(&at24_storage_dsc, "batt_eeprom", chip);
+
+	if (ret == -EPROBE_DEFER) {
+		schedule_delayed_work(&chip->init_work,
+				      msecs_to_jiffies(AT24_DELAY_INIT_MS));
+		return;
+	}
+
+	dev_info(dev, "gbms_storage_register done:%d\n", ret);
+}
+
 static int at24_probe(struct i2c_client *client)
 {
 	struct regmap_config regmap_config = { };
@@ -744,6 +969,9 @@ static int at24_probe(struct i2c_client *client)
 	dev_info(dev, "%u byte %s EEPROM, %s, %u bytes/write\n",
 		 pdata.byte_len, client->name,
 		 writable ? "writable" : "read-only", at24->write_max);
+
+	INIT_DELAYED_WORK(&at24->init_work, at24_init_work);
+	schedule_delayed_work(&at24->init_work, 0);
 
 	/* export data to kernel code */
 	if (pdata.setup)

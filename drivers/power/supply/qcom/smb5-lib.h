@@ -24,6 +24,8 @@
 #include <linux/of_gpio.h>
 #include "battery.h"
 
+#include "../google/logbuffer.h"
+
 enum print_reason {
 	PR_INTERRUPT	= BIT(0),
 	PR_REGISTER	= BIT(1),
@@ -624,6 +626,7 @@ struct smb_charger {
 	struct votable		*fcc_main_votable;
 	struct votable		*fv_votable;
 	struct votable		*usb_icl_votable;
+	struct votable		*dc_icl_votable;
 	struct votable		*awake_votable;
 	struct votable		*pl_disable_votable;
 	struct votable		*chg_disable_votable;
@@ -651,6 +654,7 @@ struct smb_charger {
 	struct work_struct	cp_status_change_work;
 	struct work_struct	batt_verify_update_work;
 	struct work_struct	plugin_check_time_work;
+	struct delayed_work	dcin_aicl_delay_work;
 	struct delayed_work	fake_plug_out_check_work;
 	struct delayed_work	ps_change_timeout_work;
 	struct delayed_work	clear_hdc_work;
@@ -916,6 +920,9 @@ struct smb_charger {
 	int			charge_status;
 	int			batt_health;
 #endif
+	/* logging */
+	struct logbuffer *log;
+
 	bool moisture_detection_enabled;
 	/* charger type recheck */
 	int			recheck_charger;

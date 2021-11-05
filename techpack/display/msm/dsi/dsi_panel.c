@@ -498,7 +498,7 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 		gpio_set_value(panel->reset_config.disp_en_gpio, 0);
 
 #ifdef CONFIG_BOARD_APOLLO
-	if (!panel->mi_cfg.tddi_doubleclick_flag) {
+	if (!panel->mi_cfg.tddi_doubleclick_flag || panel->mi_cfg.panel_dead_flag) {
 		if (gpio_is_valid(panel->reset_config.reset_gpio))
 			gpio_set_value(panel->reset_config.reset_gpio, 0);
 	}
@@ -525,7 +525,7 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 	}
 
 #ifdef CONFIG_BOARD_APOLLO
-	if(!panel->mi_cfg.tddi_doubleclick_flag) {
+	if(!panel->mi_cfg.tddi_doubleclick_flag || panel->mi_cfg.panel_dead_flag) {
 		rc = dsi_pwr_enable_regulator(&panel->power_info, false);
 	}
 #else
@@ -1025,6 +1025,7 @@ static void dsi_panel_parse_split_link_config(struct dsi_host_common_cfg *host,
 	split_link->split_link_enabled = true;
 }
 
+#ifndef CONFIG_BOARD_XIAOMI
 static int dsi_panel_create_sn_buf(struct dsi_panel *panel)
 {
 	struct dsi_panel_vendor_info *const vendor_info = &panel->vendor_info;
@@ -1157,6 +1158,7 @@ static int dsi_panel_parse_sn_location(struct dsi_panel *panel,
 error:
 	return rc;
 }
+#endif
 
 int dsi_panel_get_vendor_extinfo(struct dsi_panel *panel)
 {
@@ -1382,11 +1384,13 @@ static int dsi_panel_parse_vendor_info(struct dsi_panel *panel,
 		rc = -EINVAL;
 		goto error;
 	}
+#ifndef CONFIG_BOARD_XIAOMI
 	rc = dsi_panel_parse_sn_location(panel, of_node);
 	if (rc) {
 		DSI_ERR("[%s] failed to parse the parameter for SN, rc=%d\n",
 			panel->name, rc);
 	}
+#endif
 	rc = dsi_panel_parse_vendor_extinfo_location(panel, of_node);
 	if (rc) {
 		DSI_ERR("[%s] failed to parse the extended panel info, rc=%d\n",
@@ -1947,6 +1951,8 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
 	"mi,mdss-dsi-read-lockdown-info-command",
+	"mi,mdss-dsi-hbm-fod-on-command",
+	"mi,mdss-dsi-hbm-fod-off-command",
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -1975,6 +1981,8 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
 	"mi,mdss-dsi-read-lockdown-info-command-state",
+	"mi,mdss-dsi-hbm-fod-on-command-state",
+	"mi,mdss-dsi-hbm-fod-off-command-state",
 };
 
 static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
@@ -3597,9 +3605,11 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 
 	mutex_init(&panel->panel_lock);
 
+#ifndef CONFIG_BOARD_XIAOMI
 	rc = dsi_panel_create_sn_buf(panel);
 	if (rc)
 		DSI_ERR("failed to create buffer for SN, rc=%d\n", rc);
+#endif
 
 	panel->hbm_sv_enabled = true;
 	INIT_DELAYED_WORK(&panel->hanghandler_work,
@@ -3615,7 +3625,9 @@ void dsi_panel_put(struct dsi_panel *panel)
 {
 	cancel_delayed_work_sync(&panel->hanghandler_work);
 
+#ifndef CONFIG_BOARD_XIAOMI
 	dsi_panel_release_sn_buf(panel);
+#endif
 
 	dsi_panel_release_vendor_extinfo(panel);
 
@@ -4039,6 +4051,7 @@ void dsi_panel_debugfs_init(struct dsi_panel *panel, struct dentry *dir)
 
 	dsi_panel_debugfs_create_cmdsets_from_list(dir, panel);
 	dsi_panel_bl_debugfs_init(dir, panel);
+	dsi_panel_bl_elvss_debugfs_init(dir, panel);
 
 	return;
 
@@ -4559,8 +4572,10 @@ int dsi_panel_pre_prepare(struct dsi_panel *panel)
 	mutex_lock(&panel->panel_lock);
 
 #ifdef CONFIG_BOARD_APOLLO
-	if (!panel->mi_cfg.tddi_doubleclick_flag) {
+	if (!panel->mi_cfg.tddi_doubleclick_flag || panel->mi_cfg.panel_dead_flag) {
 		rc = dsi_pwr_enable_regulator(&panel->power_info, true);
+		if (panel->mi_cfg.panel_dead_flag)
+			panel->mi_cfg.panel_dead_flag = false;
 	}
 #else
 	rc = dsi_pwr_enable_regulator(&panel->power_info, true);
@@ -5188,6 +5203,9 @@ int dsi_panel_enable(struct dsi_panel *panel)
 
 	mutex_unlock(&panel->panel_lock);
 
+	if (panel->fod_hbm_mode)
+		dsi_panel_apply_fod_hbm_mode(panel);
+
 	if (!rc)
 		rc = dsi_backlight_late_dpms(&panel->bl_config,
 					       SDE_MODE_DPMS_ON);
@@ -5362,4 +5380,27 @@ int dsi_panel_wakeup(struct dsi_panel *panel)
 		return panel->funcs->wakeup(panel);
 
 	return 0;
+}
+
+int dsi_panel_apply_fod_hbm_mode(struct dsi_panel *panel)
+{
+	static const enum dsi_cmd_set_type type_map[] = {
+		DSI_CMD_SET_DISP_HBM_FOD_OFF,
+		DSI_CMD_SET_DISP_HBM_FOD_ON
+	};
+
+	enum dsi_cmd_set_type type;
+	int rc;
+
+	if (panel->hbm_mode >= 0 &&
+		panel->hbm_mode < ARRAY_SIZE(type_map))
+		type = type_map[panel->fod_hbm_mode];
+	else
+		type = DSI_CMD_SET_DISP_HBM_FOD_OFF;
+
+	mutex_lock(&panel->panel_lock);
+	rc = dsi_panel_tx_cmd_set(panel, type);
+	mutex_unlock(&panel->panel_lock);
+
+	return rc;
 }

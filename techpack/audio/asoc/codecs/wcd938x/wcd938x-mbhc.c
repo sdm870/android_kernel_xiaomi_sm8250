@@ -587,7 +587,7 @@ left_ch_impedance:
 		*zl = z1L/1000;
 		wcd938x_wcd_mbhc_qfuse_cal(component, zl, 0);
 	}
-	dev_dbg(component->dev, "%s: impedance on HPH_L = %d(ohms)\n",
+	dev_info(component->dev, "%s: impedance on HPH_L = %d(ohms)\n",
 		__func__, *zl);
 
 	/* Start of right impedance ramp and calculation */
@@ -619,7 +619,7 @@ right_ch_impedance:
 		*zr = z1R/1000;
 		wcd938x_wcd_mbhc_qfuse_cal(component, zr, 1);
 	}
-	dev_dbg(component->dev, "%s: impedance on HPH_R = %d(ohms)\n",
+	dev_info(component->dev, "%s: impedance on HPH_R = %d(ohms)\n",
 		__func__, *zr);
 
 	/* Mono/stereo detection */
@@ -1093,6 +1093,9 @@ int wcd938x_mbhc_init(struct wcd938x_mbhc **mbhc,
 		goto err;
 	}
 	wcd_mbhc->micb_mv = pdata->micbias.micb2_mv;
+
+	wcd938x_mbhc_micb_adjust_voltage(component,
+			pdata->micbias.micb2_mv, MIC_BIAS_2);
 
 	ret = wcd_mbhc_init(wcd_mbhc, component, &mbhc_cb,
 				&intr_ids, wcd_mbhc_registers,

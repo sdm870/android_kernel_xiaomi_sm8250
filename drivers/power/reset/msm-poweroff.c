@@ -77,8 +77,8 @@ static int download_mode = 1;
 static struct kobject dload_kobj;
 #define KASLR_OFFSET_PROP "qcom,msm-imem-kaslr_offset"
 
-static int in_panic;
-static int dload_type = SCM_DLOAD_FULLDUMP;
+static int in_panic = 0;
+static int dload_type = SCM_DLOAD_BOTHDUMPS;
 static void *dload_mode_addr;
 static bool dload_mode_enabled;
 static void *emergency_dload_mode_addr;
@@ -613,8 +613,12 @@ static void msm_restart_prepare(const char *cmd)
 			if (!strcmp(cmd, "reboot-ab-update") &&
 					force_warm_reboot_on_ab_update)
 				need_warm_reset = true;
+			qpnp_pon_set_restart_reason(PON_RESTART_REASON_NORMAL);
 			__raw_writel(0x77665501, restart_reason);
 		}
+	} else {
+		qpnp_pon_set_restart_reason(PON_RESTART_REASON_NORMAL);
+		__raw_writel(0x77665501, restart_reason);
 	}
 
 
