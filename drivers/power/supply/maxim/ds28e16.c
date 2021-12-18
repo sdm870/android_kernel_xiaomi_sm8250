@@ -43,7 +43,7 @@ struct ds28e16_data {
 
 	int version;
 	int cycle_count;
-	bool batt_verified;
+	int batt_verified;
 #ifdef	CONFIG_FACTORY_BUILD
 	bool factory_enable;
 #endif
@@ -965,7 +965,6 @@ static enum power_supply_property verify_props[] = {
 	POWER_SUPPLY_PROP_PAGE0_DATA,
 	POWER_SUPPLY_PROP_PAGE1_DATA,
 	POWER_SUPPLY_PROP_VERIFY_MODEL_NAME,
-	POWER_SUPPLY_PROP_CHIP_OK,
 	POWER_SUPPLY_PROP_MAXIM_BATT_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_AUTHENTIC,
 };
@@ -990,7 +989,7 @@ static int verify_get_property(struct power_supply *psy, enum power_supply_prope
 			val->strval = "unknown";
 		break;
 	case POWER_SUPPLY_PROP_AUTHEN_RESULT:
-		if (data->batt_verified == DS_TRUE)
+		if (data->batt_verified)
 			val->intval = true;
 		else
 			val->intval = false;
@@ -1007,11 +1006,6 @@ static int verify_get_property(struct power_supply *psy, enum power_supply_prope
 		if (ret != DS_TRUE)
 			return -EAGAIN;
 		break;
-	case POWER_SUPPLY_PROP_CHIP_OK:
-		ret = Read_RomID(mi_romid);
-		ds_err("get chip_ok read RomID = %02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x\n",
-				mi_romid[0], mi_romid[1], mi_romid[2], mi_romid[3],
-				mi_romid[4], mi_romid[5], mi_romid[6], mi_romid[7]);
 #ifdef CONFIG_FACTORY_BUILD
 		ds_err("CONFIG_FACTORY_BUILD, chip_ok_flag=%d.\n", chip_ok_flag);
 		if ((mi_romid[0] == 0x9f) && (mi_romid[6] == 0x04) && ((mi_romid[5] & 0xf0) == 0xf0)) {
@@ -1061,6 +1055,9 @@ static int verify_get_property(struct power_supply *psy, enum power_supply_prope
 						+ pagedata[0];
 			val->intval = DC_INIT_VALUE - data->cycle_count;
 		}
+		break;
+	case POWER_SUPPLY_PROP_AUTHENTIC:
+		val->intval = data->batt_verified;
 		break;
 	default:
 		ds_dbg("unsupported property %d\n", psp);

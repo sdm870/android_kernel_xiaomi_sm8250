@@ -3093,31 +3093,173 @@ static int aw8697_haptics_upload_effect(struct input_dev *dev,
 		}
 		aw8697->is_custom_wave = 0;
 
-		if (aw8697->effect_id < aw8697->info.effect_id_boundary) {
+		switch (aw8697->effect_id) {
+		case 162:
+			aw8697->effect_id = 2;
 			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
 			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
 				__func__, aw8697->effect_id, aw8697->activate_mode);
 			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
 			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
-		}
-		if (aw8697->effect_id >= aw8697->info.effect_id_boundary) {
-			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RTP_MODE;
+			goto out;
+		case 163:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
 			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
 				__func__, aw8697->effect_id, aw8697->activate_mode);
-			data[1] = aw8697->info.rtp_time[aw8697->effect_id]/1000; /*second data*/
-			data[2] = aw8697->info.rtp_time[aw8697->effect_id];  /*millisecond data*/
-		}
-		if (aw8697->effect_id == CUSTOME_WAVE_ID) {
-			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RTP_MODE;
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 0: // CLICK
+			aw8697->effect_id = 0;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
 			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
 				__func__, aw8697->effect_id, aw8697->activate_mode);
-			data[1] = aw8697->info.rtp_time[aw8697->effect_id]/1000; /*second data*/
-			data[2] = aw8697->info.rtp_time[aw8697->effect_id];  /*millisecond data*/
-			aw8697->is_custom_wave = 1;
-			rb_init();
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 1: // DOUBLE_CLICK
+			aw8697->effect_id = 1;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 2: // TICK
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 3: // THUD
+			aw8697->effect_id = 3;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 4: // POP
+			aw8697->effect_id = 4;
+			aw8697->play.vmax_mv = 0x7fff;
+			aw8697->level = 0x80;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 5: // HEAVY_CLICK
+			aw8697->effect_id = 5;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 8:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 81:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 90:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 93:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 157:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 158:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 159:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 160:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		case 166:
+			aw8697->effect_id = 2;
+			aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+			pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+				__func__, aw8697->effect_id, aw8697->activate_mode);
+			data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+			data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			goto out;
+		default:
+			if (aw8697->effect_id < aw8697->info.effect_id_boundary) {
+				aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+				pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+					__func__, aw8697->effect_id, aw8697->activate_mode);
+				data[1] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000000; /*second data*/
+				data[2] = aw8697->predefined[aw8697->effect_id].play_rate_us/1000;  /*millisecond data*/
+			}
+			if (aw8697->effect_id >= aw8697->info.effect_id_boundary) {
+				aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RTP_MODE;
+				pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+					__func__, aw8697->effect_id, aw8697->activate_mode);
+				data[1] = aw8697->info.rtp_time[aw8697->effect_id]/1000; /*second data*/
+				data[2] = aw8697->info.rtp_time[aw8697->effect_id];  /*millisecond data*/
+			}
+			if (aw8697->effect_id == CUSTOME_WAVE_ID) {
+				aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RTP_MODE;
+				pr_debug("%s: aw8697->effect_id=%d , aw8697->activate_mode = %d\n",
+					__func__, aw8697->effect_id, aw8697->activate_mode);
+				data[1] = aw8697->info.rtp_time[aw8697->effect_id]/1000; /*second data*/
+				data[2] = aw8697->info.rtp_time[aw8697->effect_id];  /*millisecond data*/
+				aw8697->is_custom_wave = 1;
+				rb_init();
+			}
 		}
 
 
+out:
 		if (copy_to_user(effect->u.periodic.custom_data, data,
 			sizeof(s16) * CUSTOM_DATA_LEN)) {
 			mutex_unlock(&aw8697->lock);

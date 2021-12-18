@@ -13,12 +13,6 @@ config TOUCHSCREEN_FOCALTECH
       To compile this driver as a module, choose M here: the
       module will be called focaltech_touch.
 
-config TOUCHSCREEN_FTS_DIRECTORY
-    string "Focaltech ts directory name"
-    default "focaltech_touch"
-    depends on TOUCHSCREEN_FTS
-
-
 config TOUCHSCREEN_SUPPORT_NEW_GAME_MODE
     tristate "Touch Support New Game Mode"
     default n
@@ -26,3 +20,34 @@ config TOUCHSCREEN_SUPPORT_NEW_GAME_MODE
       Say Y here if the device support new game mode
 
       If not support, say N.
+
+config TOUCHSCREEN_FOCALTECH_TEST
+    bool "Focaltech Touchscreen Test"
+    depends on TOUCHSCREEN_FOCALTECH
+    default n
+    help
+      Say Y here if you have Focaltech touch panel test.
+      If unsure, say N.
+
+config TOUCHSCREEN_FOCALTECH_ESDCHECK
+    bool "Focaltech Touchscreen ESD Check"
+    depends on TOUCHSCREEN_FOCALTECH
+    default n
+    help
+      Say Y here if you have Focaltech touch panel esd check.
+      If unsure, say N.
+
+config TOUCHSCREEN_FOCALTECH_POINT_REPORT_CHECK
+    bool "Focaltech Touchscreen ESD Check"
+    depends on TOUCHSCREEN_FOCALTECH
+    default n
+    help
+      Say Y here if you have Focaltech touch panel point report
+      check.
+
+      If unsure, say N.
+
+config TOUCHSCREEN_FOCALTECH_DIRECTORY
+    string "Focaltech ts directory name"
+    default "focaltech_touch"
+    depends on TOUCHSCREEN_FOCALTECH

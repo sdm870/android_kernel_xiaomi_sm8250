@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2017, 2019 The Linux Foundation. All rights reserved.
- * Copyright (C) 2021 XiaoMi, Inc.
  */
 
 #include <linux/debugfs.h>
+#include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/errno.h>
 #include <linux/bitops.h>
@@ -20,7 +20,9 @@
 static DEFINE_SPINLOCK(votable_list_slock);
 static LIST_HEAD(votable_list);
 
+#ifdef CONFIG_DEBUG_FS
 static struct dentry *debug_root;
+#endif
 
 struct client_vote {
 	bool	enabled;
@@ -202,6 +204,7 @@ bool is_override_vote_enabled_locked(struct votable *votable)
 
 	return votable->override_result != -EINVAL;
 }
+EXPORT_SYMBOL_GPL(is_override_vote_enabled_locked);
 
 bool is_override_vote_enabled(struct votable *votable)
 {
@@ -216,6 +219,7 @@ bool is_override_vote_enabled(struct votable *votable)
 
 	return enable;
 }
+EXPORT_SYMBOL_GPL(is_override_vote_enabled);
 
 /**
  * is_client_vote_enabled() -
@@ -243,6 +247,7 @@ bool is_client_vote_enabled_locked(struct votable *votable,
 
 	return votable->votes[client_id].enabled;
 }
+EXPORT_SYMBOL_GPL(is_client_vote_enabled_locked);
 
 bool is_client_vote_enabled(struct votable *votable, const char *client_str)
 {
@@ -256,6 +261,7 @@ bool is_client_vote_enabled(struct votable *votable, const char *client_str)
 	unlock_votable(votable);
 	return enabled;
 }
+EXPORT_SYMBOL_GPL(is_client_vote_enabled);
 
 /**
  * get_client_vote() -
@@ -286,6 +292,7 @@ int get_client_vote_locked(struct votable *votable, const char *client_str)
 
 	return votable->votes[client_id].value;
 }
+EXPORT_SYMBOL_GPL(get_client_vote_locked);
 
 int get_client_vote(struct votable *votable, const char *client_str)
 {
@@ -299,6 +306,7 @@ int get_client_vote(struct votable *votable, const char *client_str)
 	unlock_votable(votable);
 	return value;
 }
+EXPORT_SYMBOL_GPL(get_client_vote);
 
 /**
  * get_effective_result() -
@@ -330,6 +338,7 @@ int get_effective_result_locked(struct votable *votable)
 
 	return votable->effective_result;
 }
+EXPORT_SYMBOL_GPL(get_effective_result_locked);
 
 int get_effective_result(struct votable *votable)
 {
@@ -343,6 +352,7 @@ int get_effective_result(struct votable *votable)
 	unlock_votable(votable);
 	return value;
 }
+EXPORT_SYMBOL_GPL(get_effective_result);
 
 /**
  * get_effective_client() -
@@ -483,12 +493,6 @@ int vote(struct votable *votable, const char *client_str, bool enabled, int val)
 	 */
 	if (!votable->voted_on
 			|| (effective_result != votable->effective_result)) {
-		if (strcmp(votable->name, "FG_WS") != 0) {
-				pr_info("%s: current vote is now %d voted by %s,%d, previous voted %d\n",
-						votable->name, effective_result,
-						get_client_str(votable, effective_id),
-						effective_id, votable->effective_result);
-		}
 		votable->effective_client_id = effective_id;
 		votable->effective_result = effective_result;
 		pr_debug("%s: effective vote is now %d voted by %s,%d\n",
@@ -507,6 +511,7 @@ out:
 	unlock_votable(votable);
 	return rc;
 }
+EXPORT_SYMBOL_GPL(vote);
 
 /**
  * vote_override() -
@@ -561,6 +566,7 @@ out:
 	unlock_votable(votable);
 	return rc;
 }
+EXPORT_SYMBOL_GPL(vote_override);
 
 int rerun_election(struct votable *votable)
 {
@@ -580,6 +586,7 @@ int rerun_election(struct votable *votable)
 	unlock_votable(votable);
 	return rc;
 }
+EXPORT_SYMBOL_GPL(rerun_election);
 
 struct votable *find_votable(const char *name)
 {
@@ -608,7 +615,9 @@ out:
 	else
 		return NULL;
 }
+EXPORT_SYMBOL_GPL(find_votable);
 
+#ifdef CONFIG_DEBUG_FS
 static int force_active_get(void *data, u64 *val)
 {
 	struct votable *votable = data;
@@ -710,6 +719,7 @@ static const struct file_operations votable_status_ops = {
 	.llseek		= seq_lseek,
 	.release	= single_release,
 };
+#endif /* CONFIG_DEBUG_FS */
 
 struct votable *create_votable(const char *name,
 				int votable_type,
@@ -729,6 +739,7 @@ struct votable *create_votable(const char *name,
 	if (votable)
 		return ERR_PTR(-EEXIST);
 
+#ifdef CONFIG_DEBUG_FS
 	if (debug_root == NULL) {
 		debug_root = debugfs_create_dir("pmic-votable", NULL);
 		if (!debug_root) {
@@ -736,6 +747,7 @@ struct votable *create_votable(const char *name,
 			return ERR_PTR(-ENOMEM);
 		}
 	}
+#endif
 
 	if (votable_type >= NUM_VOTABLE_TYPES) {
 		pr_err("Invalid votable_type specified for voter\n");
@@ -772,6 +784,7 @@ struct votable *create_votable(const char *name,
 	list_add(&votable->list, &votable_list);
 	spin_unlock_irqrestore(&votable_list_slock, flags);
 
+#ifdef CONFIG_DEBUG_FS
 	votable->root = debugfs_create_dir(name, debug_root);
 	if (!votable->root) {
 		pr_err("Couldn't create debug dir %s\n", name);
@@ -815,9 +828,11 @@ struct votable *create_votable(const char *name,
 		kfree(votable);
 		return ERR_PTR(-EEXIST);
 	}
+#endif /* CONFIG_DEBUG_FS */
 
 	return votable;
 }
+EXPORT_SYMBOL_GPL(create_votable);
 
 void destroy_votable(struct votable *votable)
 {
@@ -831,7 +846,9 @@ void destroy_votable(struct votable *votable)
 	list_del(&votable->list);
 	spin_unlock_irqrestore(&votable_list_slock, flags);
 
+#ifdef CONFIG_DEBUG_FS
 	debugfs_remove_recursive(votable->root);
+#endif
 
 	for (i = 0; i < votable->num_clients && votable->client_strs[i]; i++)
 		kfree(votable->client_strs[i]);
@@ -839,3 +856,7 @@ void destroy_votable(struct votable *votable)
 	kfree(votable->name);
 	kfree(votable);
 }
+EXPORT_SYMBOL_GPL(destroy_votable);
+
+MODULE_DESCRIPTION("QPNP PMIC Voter driver");
+MODULE_LICENSE("GPL v2");

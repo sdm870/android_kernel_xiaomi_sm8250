@@ -31,9 +31,6 @@ static int __init audio_q6_init(void)
 #ifdef CONFIG_US_PROXIMITY
 	mius_driver_init();
 #endif
-#ifdef CONFIG_MSM_CSPL
-	crus_sp_init();
-#endif
 	return 0;
 }
 
@@ -60,9 +57,6 @@ static void __exit audio_q6_exit(void)
 #endif
 #ifdef CONFIG_US_PROXIMITY
 	mius_driver_exit();
-#endif
-#ifdef CONFIG_MSM_CSPL
-	crus_sp_exit();
 #endif
 }
 

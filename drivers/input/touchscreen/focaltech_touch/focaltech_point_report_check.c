@@ -38,7 +38,7 @@
 *****************************************************************************/
 #include "focaltech_core.h"
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
 /*****************************************************************************
 * Private constant and macro definitions using #define
 *****************************************************************************/

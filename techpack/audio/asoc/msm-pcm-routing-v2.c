@@ -102,11 +102,6 @@ static int msm_ec_ref_port_id;
 static int afe_loopback_tx_port_index;
 static int afe_loopback_tx_port_id = -1;
 
-#ifdef CONFIG_MSM_CSPL
-	extern void msm_crus_pb_add_controls(struct snd_soc_component *platform);
-	extern void msm_crus_pb_set_copp_idx(int port_id, int copp_idx);
-#endif
-
 #define WEIGHT_0_DB 0x4000
 /* all the FEs which can support channel mixer */
 static struct msm_pcm_channel_mixer channel_mixer[MSM_FRONTEND_DAI_MM_SIZE];
@@ -1638,9 +1633,6 @@ int msm_pcm_routing_reg_phy_compr_stream(int fe_id, int perf_mode,
 				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
-			#ifdef CONFIG_MSM_CSPL
-			msm_crus_pb_set_copp_idx(port_id, copp_idx);
-			#endif
 			pr_debug("%s: set idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, fe_id, session_type, i);
 			set_bit(copp_idx,
@@ -2002,9 +1994,6 @@ int msm_pcm_routing_reg_phy_stream(int fedai_id, int perf_mode,
 				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
-			#ifdef CONFIG_MSM_CSPL
-			msm_crus_pb_set_copp_idx(port_id, copp_idx);
-			#endif
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, fedai_id, session_type, i);
 			set_bit(copp_idx,
@@ -2289,9 +2278,6 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 				mutex_unlock(&routing_lock);
 				return;
 			}
-			#ifdef CONFIG_MSM_CSPL
-			msm_crus_pb_set_copp_idx(port_id, copp_idx);
-			#endif
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, val, session_type, reg);
 			set_bit(copp_idx,
@@ -2462,6 +2448,11 @@ static void msm_pcm_routing_process_voice(u16 reg, u16 val, int set)
 	pr_debug("%s: reg %x val %x set %x\n", __func__, reg, val, set);
 
 	session_id = msm_pcm_routing_get_voc_sessionid(val);
+
+	if (!session_id) {
+		pr_err("%s: Invalid session_id %x\n", __func__, session_id);
+		return;
+	}
 
 	pr_debug("%s: FE DAI 0x%x session_id 0x%x\n",
 		__func__, val, session_id);
@@ -30512,9 +30503,6 @@ static int msm_pcm_routing_prepare(struct snd_pcm_substream *substream)
 				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
-			#ifdef CONFIG_MSM_CSPL
-			msm_crus_pb_set_copp_idx(port_id, copp_idx);
-			#endif
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
 				 __func__, i, session_type, be_id);
 			set_bit(copp_idx,
@@ -31287,9 +31275,6 @@ static int msm_routing_probe(struct snd_soc_component *component)
 #endif
 #ifdef CONFIG_US_PROXIMITY
 	mius_add_component_controls(component);
-#endif
-#ifdef CONFIG_MSM_CSPL
-	msm_crus_pb_add_controls(component);
 #endif
 
 	snd_soc_add_component_controls(component, pll_clk_drift_controls,

@@ -43,6 +43,8 @@
 #define P9221_DCIN_PON_DELAY_MS		250
 #define P9221R5_ILIM_MAX_UA		(1600 * 1000)
 #define P9221R5_OVER_CHECK_NUM		3
+#define P9221_POWER_MITIGATE_DELAY_MS	(10 * 1000)
+#define P9221_FOD_MAX_TIMES		3
 
 #define OVC_LIMIT			1
 #define OVC_THRESHOLD			1400000
@@ -59,6 +61,7 @@
 #define P9382A_NEG_POWER_11W		(11 / 0.5)
 #define P9382_RTX_TIMEOUT_MS		(2 * 1000)
 #define SCREEN_NB_INIT_DELAY_MS		(2 * 1000)
+#define CSP_SEND_DELAY_MS               (0.5 * 1000)
 
 #define WLC_ALIGNMENT_MAX		100
 #define WLC_MFG_GOOGLE			0x72
@@ -85,6 +88,8 @@ DECLARE_CRC8_TABLE(p9221_crc8_table);
 
 static void p9221_icl_ramp_reset(struct p9221_charger_data *charger);
 static void p9221_icl_ramp_start(struct p9221_charger_data *charger);
+static bool p9221_has_dd(struct p9221_charger_data *charger);
+static const char *p9221_get_tx_id_str(struct p9221_charger_data *charger);
 
 static const u32 p9221_ov_set_lut[] = {
 	17000000, 20000000, 15000000, 13000000,
@@ -851,6 +856,18 @@ static void p9221_vote_defaults(struct p9221_charger_data *charger)
 
 static void p9221_set_offline(struct p9221_charger_data *charger)
 {
+	if (charger->fod_cnt == 0) {
+		/* already change to BPP or not doing power_mitigation */
+		cancel_delayed_work(&charger->power_mitigation_work);
+		charger->trigger_power_mitigation = false;
+		charger->wait_for_online = false;
+	} else {
+		charger->wait_for_online = true;
+		schedule_delayed_work(&charger->power_mitigation_work,
+				      msecs_to_jiffies(
+					  P9221_POWER_MITIGATE_DELAY_MS));
+	}
+
 	dev_info(&charger->client->dev, "Set offline\n");
 	logbuffer_log(charger->log, "offline\n");
 
@@ -873,6 +890,7 @@ static void p9221_set_offline(struct p9221_charger_data *charger)
 	charger->alignment = -1;
 	charger->alignment_capable = ALIGN_MFG_FAILED;
 	charger->mfg = 0;
+	charger->tx_id = 0;
 	schedule_work(&charger->uevent_work);
 
 	/* use for ignore irq_det after Rx offline */
@@ -993,6 +1011,67 @@ static void p9221_dcin_work(struct work_struct *work)
 			msecs_to_jiffies(P9221_DCIN_TIMEOUT_MS));
 	logbuffer_log(charger->log, "dc_in: check online=%d status=%x",
 			charger->online, status_reg);
+}
+
+static void force_set_fod(struct p9221_charger_data *charger)
+{
+	u16 i = 0;
+	int ret = 0;
+
+	dev_info(&charger->client->dev, "power_mitigate: write 0 to fod\n");
+
+	for (i = 0; i < 0x10; i++)
+		ret |= p9221_reg_write_8(charger, P9221R5_FOD_REG + i, 0);
+
+	if (ret)
+		dev_err(&charger->client->dev,
+			"power_mitigate: fail to write register 0x%02x\n",
+			P9221R5_FOD_REG + i);
+}
+
+static void p9221_power_mitigation_work(struct work_struct *work)
+{
+	struct p9221_charger_data *charger = container_of(work,
+			struct p9221_charger_data, power_mitigation_work.work);
+
+	charger->wait_for_online = false;
+
+	if (!p9221_is_online(charger)) {
+		dev_info(&charger->client->dev, "power_mitigate: offline\n");
+		charger->fod_cnt = 0;
+		charger->trigger_power_mitigation = false;
+		power_supply_changed(charger->wc_psy);
+		return;
+	}
+
+	if (!p9221_is_epp(charger)) {
+		charger->fod_cnt = 0;
+		dev_info(&charger->client->dev,
+			 "power_mitigate: already BPP\n");
+		return;
+	}
+
+	/* right now p9221_has_dd() implies charger->mfg==WLC_MFG_GOOGLE */
+	if (charger->mfg != WLC_MFG_GOOGLE || !p9221_has_dd(charger)) {
+		const char *txid = p9221_get_tx_id_str(charger);
+
+		dev_info(&charger->client->dev,
+			 "power_mitigate: not DD mfg=%x, id=%s\n",
+			 charger->mfg, txid ? txid : "<>");
+		return;
+	}
+
+	if (charger->fod_cnt < P9221_FOD_MAX_TIMES) {
+		force_set_fod(charger);
+		charger->fod_cnt++;
+		dev_info(&charger->client->dev,
+			 "power_mitigate: send FOD, cnt=%d\n",
+			 charger->fod_cnt);
+	} else {
+		dev_info(&charger->client->dev,
+			 "power_mitigate: power mitigation fail!\n");
+		charger->fod_cnt = 0;
+	}
 }
 
 static void p9221_init_align(struct p9221_charger_data *charger)
@@ -1165,6 +1244,9 @@ static void p9221_align_work(struct work_struct *work)
 		charger->alignment_capable = ALIGN_MFG_PASSED;
 	}
 
+	if (!p9221_has_dd(charger))
+		return;
+
 	if (charger->pdata->alignment_scalar == 0)
 		goto no_scaling;
 
@@ -1201,7 +1283,6 @@ no_scaling:
 static const char *p9221_get_tx_id_str(struct p9221_charger_data *charger)
 {
 	int ret;
-	uint32_t tx_id = 0;
 	u16 tx_id_reg;
 
 	if (!p9221_is_online(charger))
@@ -1219,7 +1300,7 @@ static const char *p9221_get_tx_id_str(struct p9221_charger_data *charger)
 
 	if (p9221_is_epp(charger)) {
 		ret = p9221_reg_read_n(charger, tx_id_reg,
-				       &tx_id, sizeof(tx_id));
+				       &charger->tx_id, sizeof(charger->tx_id));
 		if (ret)
 			dev_err(&charger->client->dev,
 				"Failed to read txid %d\n", ret);
@@ -1231,14 +1312,31 @@ static const char *p9221_get_tx_id_str(struct p9221_charger_data *charger)
 		 * read this multiple times.)
 		 */
 		if (charger->pp_buf_valid &&
-		    sizeof(tx_id) <= P9221R5_MAX_PP_BUF_SIZE)
-			memcpy(&tx_id, &charger->pp_buf[1],
-			       sizeof(tx_id));
+		    sizeof(charger->tx_id) <= P9221R5_MAX_PP_BUF_SIZE)
+			memcpy(&charger->tx_id, &charger->pp_buf[1],
+			       sizeof(charger->tx_id));
 	}
 	scnprintf(charger->tx_id_str, sizeof(charger->tx_id_str),
-		  "%08x", tx_id);
+		  "%08x", charger->tx_id);
+
 	return charger->tx_id_str;
 }
+
+/* txid is available sometime after connect */
+static bool p9221_has_dd(struct p9221_charger_data *charger)
+{
+	u8 val;
+	bool ret = false;
+
+	if (p9221_get_tx_id_str(charger) != NULL) {
+		val = (charger->tx_id & TXID_TYPE_MASK) >> TXID_TYPE_SHIFT;
+		if (val == TXID_DD_TYPE)
+			ret = true;
+	}
+
+	return ret;
+}
+
 static const char *p9382_get_ptmc_id_str(struct p9221_charger_data *charger)
 {
 	int ret;
@@ -1279,9 +1377,21 @@ static int p9221_get_property(struct power_supply *psy,
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_PRESENT:
-		val->intval = 1;
+		if (charger->dc_psy) {
+			ret = power_supply_get_property(charger->dc_psy,
+					POWER_SUPPLY_PROP_DC_RESET, val);
+			if (ret < 0)
+				val->intval = 1;
+		} else {
+			val->intval = 1;
+		}
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
+		if (charger->wait_for_online) {
+			val->intval = 1;
+			break;
+		}
+
 		if (!charger->dc_suspend_votable)
 			charger->dc_suspend_votable =
 				find_votable("DC_SUSPEND");
@@ -1304,6 +1414,12 @@ static int p9221_get_property(struct power_supply *psy,
 			return -ENODATA;
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
+		/* Zero may be returned on transition to wireless "online", as
+		 * last_capacity is reset to -1 until capacity is re-written
+		 * from userspace, leading to a new csp packet being sent.
+		 *
+		 * b/80435107 for additional context
+		 */
 		if (charger->last_capacity > 0)
 			val->intval = charger->last_capacity;
 		else
@@ -1349,6 +1465,7 @@ static int p9221_set_property(struct power_supply *psy,
 	struct p9221_charger_data *charger = power_supply_get_drvdata(psy);
 	int ret = 0;
 	bool changed = false;
+	u32 threshold;
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_ONLINE:
@@ -1391,8 +1508,26 @@ static int p9221_set_property(struct power_supply *psy,
 		ret = p9221_send_csp(charger, charger->last_capacity);
 		if (ret)
 			dev_err(&charger->client->dev,
-				"Could send csp: %d\n", ret);
-		changed = true;
+				"Could not send csp: %d\n", ret);
+
+		threshold = (charger->mitigate_threshold > 0) ?
+			    charger->mitigate_threshold :
+			    charger->pdata->power_mitigate_threshold;
+
+		if (!threshold)
+			break;
+
+		if ((charger->last_capacity > threshold) &&
+		    !charger->trigger_power_mitigation) {
+			charger->trigger_power_mitigation = true;
+			ret = delayed_work_pending(
+			      &charger->power_mitigation_work);
+			if (!ret)
+				schedule_delayed_work(
+				    &charger->power_mitigation_work,
+				    msecs_to_jiffies(
+				    P9221_POWER_MITIGATE_DELAY_MS));
+		}
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		if (val->intval < 0) {
@@ -2726,6 +2861,34 @@ static ssize_t aicl_icl_ua_store(struct device *dev,
 
 static DEVICE_ATTR_RW(aicl_icl_ua);
 
+static ssize_t mitigate_threshold_show(struct device *dev,
+				       struct device_attribute *attr,
+				       char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", charger->mitigate_threshold);
+}
+
+static ssize_t mitigate_threshold_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+	int ret;
+	u8 threshold;
+
+	ret = kstrtou8(buf, 0, &threshold);
+	if (ret < 0)
+		return ret;
+	charger->mitigate_threshold = threshold;
+	return count;
+}
+
+static DEVICE_ATTR_RW(mitigate_threshold);
+
 /* ------------------------------------------------------------------------ */
 static ssize_t rx_lvl_show(struct device *dev,
 			   struct device_attribute *attr,
@@ -3167,6 +3330,7 @@ static struct attribute *p9221_attributes[] = {
 	&dev_attr_alignment.attr,
 	&dev_attr_aicl_delay_ms.attr,
 	&dev_attr_aicl_icl_ua.attr,
+	&dev_attr_mitigate_threshold.attr,
 	NULL
 };
 
@@ -3461,11 +3625,22 @@ static void p9382_txid_work(struct work_struct *work)
 	dev_info(&charger->client->dev, "Fast serial ID send(%s)\n", s);
 
 	mutex_unlock(&charger->cmd_lock);
-	charger->last_capacity = -1;
+	cancel_delayed_work_sync(&charger->send_csp_work);
+	schedule_delayed_work(&charger->send_csp_work,
+			      msecs_to_jiffies(CSP_SEND_DELAY_MS));
 	return;
 error:
 	mutex_unlock(&charger->cmd_lock);
 	charger->com_busy = false;
+}
+
+static void p9382_send_csp_work(struct work_struct *work)
+{
+	struct p9221_charger_data *charger = container_of(work,
+			struct p9221_charger_data, send_csp_work.work);
+
+	if (charger->last_capacity > 0)
+		p9221_send_csp(charger, charger->last_capacity);
 }
 
 static void p9382_rtx_work(struct work_struct *work)
@@ -3565,6 +3740,7 @@ static void rtx_irq_handler(struct p9221_charger_data *charger, u16 irq_src)
 			schedule_delayed_work(&charger->txid_work,
 					msecs_to_jiffies(TXID_SEND_DELAY_MS));
 		} else {
+			cancel_delayed_work_sync(&charger->send_csp_work);
 			charger->rtx_csp = 0;
 			charger->com_busy = false;
 		}
@@ -3650,8 +3826,8 @@ static void p9221_irq_handler(struct p9221_charger_data *charger, u16 irq_src)
 
 	/* Proprietary packet */
 	if (irq_src & P9221R5_STAT_PPRCVD) {
-		const size_t maxsz = sizeof(charger->pp_buf) * 3 + 1;
-		char s[maxsz];
+		char s[sizeof(charger->pp_buf) * 3 + 1];
+
 		u8 tmp, buff[sizeof(charger->pp_buf)], crc;
 
 		res = p9221_reg_read_n(charger,
@@ -3683,7 +3859,7 @@ static void p9221_irq_handler(struct p9221_charger_data *charger, u16 irq_src)
 			charger->pp_buf_valid = (charger->pp_buf[0] == 0x4F);
 
 			p9221_hex_str(charger->pp_buf, sizeof(charger->pp_buf),
-				      s, maxsz, false);
+				      s, ARRAY_SIZE(s), false);
 			dev_info(&charger->client->dev, "Received PP: %s\n", s);
 
 			/* Check if charging on a Tx phone */
@@ -4115,6 +4291,13 @@ static int p9221_parse_dt(struct device *dev,
 	dev_info(dev, "google,alignment_offset_high_current set to: %d\n",
 		 pdata->alignment_offset_high_current);
 
+	ret = of_property_read_u32(node, "google,power_mitigate_threshold",
+				   &data);
+	if (ret < 0)
+		pdata->power_mitigate_threshold = 0;
+	else
+		pdata->power_mitigate_threshold = data;
+
 	return 0;
 }
 
@@ -4375,6 +4558,9 @@ static int p9221_charger_probe(struct i2c_client *client,
 	INIT_DELAYED_WORK(&charger->rtx_work, p9382_rtx_work);
 	INIT_DELAYED_WORK(&charger->screen_nb_init_work,
 			  p9382_screen_nb_init_work);
+	INIT_DELAYED_WORK(&charger->send_csp_work, p9382_send_csp_work);
+	INIT_DELAYED_WORK(&charger->power_mitigation_work,
+			  p9221_power_mitigation_work);
 	INIT_WORK(&charger->uevent_work, p9221_uevent_work);
 	INIT_WORK(&charger->rtx_disable_work, p9382_rtx_disable_work);
 	alarm_init(&charger->icl_ramp_alarm, ALARM_BOOTTIME,
@@ -4580,6 +4766,8 @@ static int p9221_charger_remove(struct i2c_client *client)
 	cancel_delayed_work_sync(&charger->align_work);
 	cancel_delayed_work_sync(&charger->rtx_work);
 	cancel_delayed_work_sync(&charger->screen_nb_init_work);
+	cancel_delayed_work_sync(&charger->send_csp_work);
+	cancel_delayed_work_sync(&charger->power_mitigation_work);
 	cancel_work_sync(&charger->uevent_work);
 	cancel_work_sync(&charger->rtx_disable_work);
 	alarm_try_to_cancel(&charger->icl_ramp_alarm);

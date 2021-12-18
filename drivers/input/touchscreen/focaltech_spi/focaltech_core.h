@@ -298,7 +298,7 @@ int fts_create_sysfs(struct fts_ts_data *ts_data);
 int fts_remove_sysfs(struct fts_ts_data *ts_data);
 
 /* ESD */
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 int fts_esdcheck_init(struct fts_ts_data *ts_data);
 int fts_esdcheck_exit(struct fts_ts_data *ts_data);
 int fts_esdcheck_switch(bool enable);
@@ -309,13 +309,13 @@ int fts_esdcheck_resume(void);
 #endif
 
 /* Production test */
-#if FTS_TEST_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_TEST)
 int fts_test_init(struct fts_ts_data *ts_data);
 int fts_test_exit(struct fts_ts_data *ts_data);
 #endif
 
 /* Point Report Check*/
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_POINT_REPORT_CHECK)
 int fts_point_report_check_init(struct fts_ts_data *ts_data);
 int fts_point_report_check_exit(struct fts_ts_data *ts_data);
 void fts_prc_queue_work(struct fts_ts_data *ts_data);

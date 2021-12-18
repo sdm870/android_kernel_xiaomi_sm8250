@@ -1156,7 +1156,7 @@ int fts_upgrade_bin(char *fw_name, bool force)
 
 	upg->ts_data->fw_loading = 1;
 	fts_irq_disable();
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_switch(DISABLE);
 #endif
 
@@ -1209,7 +1209,7 @@ int fts_upgrade_bin(char *fw_name, bool force)
 	ret = 0;
 
 err_bin:
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_switch(ENABLE);
 #endif
 	fts_irq_enable();
@@ -1640,7 +1640,9 @@ static bool fts_fwupg_need_upgrade(struct fts_upgrade *upg)
 		}
 
 		FTS_INFO("fw version in tp:%x, host:%x", fw_ver_in_tp, fw_ver_in_host);
-		return true;
+		if (fw_ver_in_tp != fw_ver_in_host) {
+			return true;
+		}
 	} else {
 		FTS_INFO("fw invalid, need upgrade fw");
 		return true;
@@ -1990,7 +1992,7 @@ static void fts_fwupg_work(struct work_struct *work)
 
 	upg->ts_data->fw_loading = 1;
 	fts_irq_disable();
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_switch(DISABLE);
 #endif
 
@@ -2005,7 +2007,7 @@ static void fts_fwupg_work(struct work_struct *work)
 		fts_fwupg_auto_upgrade(upg);
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_switch(ENABLE);
 #endif
 	fts_irq_enable();

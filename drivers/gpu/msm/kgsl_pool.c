@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <asm/cacheflush.h>
@@ -13,7 +13,7 @@
 #include "kgsl_pool.h"
 #include "kgsl_sharedmem.h"
 
-#define KGSL_MAX_POOLS 4
+#define KGSL_MAX_POOLS 6
 #define KGSL_MAX_POOL_ORDER 8
 #define KGSL_MAX_RESERVED_PAGES 4096
 
@@ -61,8 +61,6 @@ _kgsl_get_pool_from_order(unsigned int order)
 static void
 _kgsl_pool_add_page(struct kgsl_page_pool *pool, struct page *p)
 {
-	kgsl_zero_page(p, pool->pool_order);
-
 	spin_lock(&pool->list_lock);
 	list_add_tail(&p->lru, &pool->page_list);
 	pool->page_count++;
@@ -192,9 +190,7 @@ kgsl_pool_reduce(unsigned int target_pages, bool exit)
 		if (!pool->allocation_allowed && !exit)
 			continue;
 
-		total_pages -= pcount;
-
-		nr_removed = total_pages - target_pages;
+		nr_removed = total_pages - target_pages - pcount;
 		if (nr_removed <= 0)
 			return pcount;
 
@@ -273,7 +269,8 @@ static int kgsl_pool_get_retry_order(unsigned int order)
  * Return total page count on success and negative value on failure
  */
 int kgsl_pool_alloc_page(int *page_size, struct page **pages,
-			unsigned int pages_len, unsigned int *align)
+			unsigned int pages_len, unsigned int *align,
+			struct device *dev)
 {
 	int j;
 	int pcount = 0;
@@ -299,7 +296,6 @@ int kgsl_pool_alloc_page(int *page_size, struct page **pages,
 			} else
 				return -ENOMEM;
 		}
-		kgsl_zero_page(page, order);
 		goto done;
 	}
 
@@ -317,7 +313,6 @@ int kgsl_pool_alloc_page(int *page_size, struct page **pages,
 			page = _kgsl_alloc_pages(order);
 			if (page == NULL)
 				return -ENOMEM;
-			kgsl_zero_page(page, order);
 			goto done;
 		}
 	}
@@ -344,11 +339,10 @@ int kgsl_pool_alloc_page(int *page_size, struct page **pages,
 			} else
 				return -ENOMEM;
 		}
-
-		kgsl_zero_page(page, order);
 	}
 
 done:
+	kgsl_zero_page(page, order, dev);
 	for (j = 0; j < (*page_size >> PAGE_SHIFT); j++) {
 		p = nth_page(page, j);
 		pages[pcount] = p;

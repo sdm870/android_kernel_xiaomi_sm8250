@@ -11,12 +11,39 @@ config TOUCHSCREEN_FTS
 		If unsure, say N.
 
 config TOUCHSCREEN_FTS_FOD
-    tristate "Touch Support New Game Mode"
-    default n
-    help
-      Say Y here if the device support new game mode
+	bool "Touch Support New Game Mode"
+	depends on TOUCHSCREEN_FTS
+	default n
+	help
+		Say Y here if the device support new game mode
 
-      If not support, say N.
+		If not support, say N.
+
+config TOUCHSCREEN_FTS_TEST
+	bool "Focaltech Touchscreen Test"
+	depends on TOUCHSCREEN_FTS
+	default n
+	help
+		Say Y here if you have Focaltech touch panel test.
+		If unsure, say N.
+
+config TOUCHSCREEN_FTS_ESDCHECK
+	bool "Focaltech Touchscreen ESD Check"
+	depends on TOUCHSCREEN_FTS
+	default n
+	help
+		Say Y here if you have Focaltech touch panel esd check.
+		If unsure, say N.
+
+config TOUCHSCREEN_FTS_POINT_REPORT_CHECK
+	bool "Focaltech Touchscreen ESD Check"
+	depends on TOUCHSCREEN_FTS
+	default n
+	help
+		Say Y here if you have Focaltech touch panel point report
+		check.
+
+		If unsure, say N.
 
 config TOUCHSCREEN_FTS_DIRECTORY
 	string "Focaltech ts directory name"

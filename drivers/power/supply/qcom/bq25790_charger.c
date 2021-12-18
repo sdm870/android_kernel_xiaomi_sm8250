@@ -877,15 +877,15 @@ static int bq25790_read_bat_curr(struct bq25790 *bq, int *curr)
 	s16 reg_val;
 
 	ret = bq25790_read_adc_data(bq, ADC_IBAT, curr);
-	printk("==test *curr:%x\n", *curr);
+	bq_log("==test *curr:%x\n", *curr);
 	reg_val = *curr;
-	printk("==test reg_val:%d\n", reg_val);
+	bq_log("==test reg_val:%d\n", reg_val);
 
 	if (ret >= 0) {
 		*curr = reg_val * BQ25790_ICHG_ADC_LB_LSB * (-1);
 	}
 	*curr *= 1000;
-	printk("==test reg_val:%d, *curr:%d\n\n", reg_val, *curr);
+	bq_log("==test reg_val:%d, *curr:%d\n\n", reg_val, *curr);
 
 	return ret;
 }

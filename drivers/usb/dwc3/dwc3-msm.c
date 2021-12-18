@@ -48,8 +48,10 @@
 #include "dbm.h"
 #include "debug.h"
 #include "xhci.h"
+#include "../pd/usbpd.h"
 
 #define SDP_CONNETION_CHECK_TIME 10000 /* in ms */
+#define EXTCON_SYNC_EVENT_TIMEOUT_MS 1500 /* in ms */
 
 /* time out to wait for USB cable status notification (in ms)*/
 #define SM_INIT_TIMEOUT 30000
@@ -120,11 +122,6 @@
 #define DWC3_GEVNTADRHI_EVNTADRHI_GSI_EN(n)	(n << 22)
 #define DWC3_GEVNTADRHI_EVNTADRHI_GSI_IDX(n)	(n << 16)
 #define DWC3_GEVENT_TYPE_GSI			0x3
-
-#undef dev_dbg
-#define dev_dbg dev_info
-#undef pr_debug
-#define pr_debug pr_info
 
 enum usb_gsi_reg {
 	GENERAL_CFG_REG,
@@ -355,6 +352,8 @@ struct dwc3_msm {
 	struct mutex suspend_resume_mutex;
 
 	enum usb_device_speed override_usb_speed;
+	u32 auto_vbus_src_sel;
+
 	u32			*gsi_reg;
 	int			gsi_reg_offset_cnt;
 	bool			gsi_io_coherency_disabled;
@@ -3765,6 +3764,8 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, mdwc);
+	/* set the initial value */
+	mdwc->usb_data_enabled = true;
 	mdwc->dev = &pdev->dev;
 
 	INIT_LIST_HEAD(&mdwc->req_complete_list);
@@ -3806,6 +3807,13 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 
 	mdwc->charging_disabled = of_property_read_bool(node,
 				"qcom,charging-disabled");
+
+	ret = of_property_read_u32(node, "google,switch-vbus",
+				   &mdwc->auto_vbus_src_sel);
+	if (ret) {
+		dev_dbg(&pdev->dev, "setting auto_vbus_src_sel to zero.\n");
+		mdwc->auto_vbus_src_sel = 0;
+	}
 
 	ret = of_property_read_u32(node, "qcom,lpm-to-suspend-delay-ms",
 				&mdwc->lpm_to_suspend_delay);
@@ -4123,8 +4131,6 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 		dwc3_ext_event_notify(mdwc);
 	}
 
-	/* set the initial value */
-	mdwc->usb_data_enabled = true;
 	device_create_file(&pdev->dev, &dev_attr_orientation);
 	device_create_file(&pdev->dev, &dev_attr_mode);
 	device_create_file(&pdev->dev, &dev_attr_speed);
@@ -4158,8 +4164,6 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 		regulator_unregister_notifier(mdwc->dpdm_reg, &mdwc->dpdm_nb);
 		mdwc->dpdm_nb.notifier_call = NULL;
 	}
-
-	device_create_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	if (mdwc->usb_psy)
 		power_supply_put(mdwc->usb_psy);
@@ -4231,6 +4235,50 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static bool dwc3_is_root_hub_direct_child(struct usb_device *udev,
+					  struct dwc3 *dwc)
+{
+	return udev->parent &&
+	       !udev->parent->parent &&
+	       udev->dev.parent->parent == &dwc->xhci->dev;
+}
+
+static bool dwc3_use_external_vbus_booster(struct usb_device *udev,
+					   struct dwc3 *dwc,
+					   struct dwc3_msm *mdwc)
+{
+	unsigned max_power;
+
+	if (!udev->actconfig)
+		return false;
+
+	if (udev->speed >= USB_SPEED_SUPER)
+		max_power = udev->actconfig->desc.bMaxPower * 8;
+	else
+		max_power = udev->actconfig->desc.bMaxPower * 2;
+
+	if (dwc3_is_root_hub_direct_child(udev, dwc) &&
+	    udev->descriptor.bDeviceClass != USB_CLASS_HUB &&
+	    max_power < mdwc->auto_vbus_src_sel)
+		return true;
+
+	return false;
+}
+
+static BLOCKING_NOTIFIER_HEAD(ext_vbus_notifier_list);
+
+void ext_vbus_register_notify(struct notifier_block *nb)
+{
+	blocking_notifier_chain_register(&ext_vbus_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(ext_vbus_register_notify);
+
+void ext_vbus_unregister_notify(struct notifier_block *nb)
+{
+	blocking_notifier_chain_unregister(&ext_vbus_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(ext_vbus_unregister_notify);
+
 static int dwc3_msm_host_notifier(struct notifier_block *nb,
 	unsigned long event, void *ptr)
 {
@@ -4246,8 +4294,7 @@ static int dwc3_msm_host_notifier(struct notifier_block *nb,
 	 * i.e. dwc -> xhci -> root_hub -> udev
 	 * root_hub's udev->parent==NULL, so traverse struct device hierarchy
 	 */
-	if (udev->parent && !udev->parent->parent &&
-			udev->dev.parent->parent == &dwc->xhci->dev) {
+	if (dwc3_is_root_hub_direct_child(udev, dwc)) {
 		if (event == USB_DEVICE_ADD && udev->actconfig) {
 			if (!dwc3_msm_is_ss_rhport_connected(mdwc)) {
 				/*
@@ -4272,6 +4319,16 @@ static int dwc3_msm_host_notifier(struct notifier_block *nb,
 			mdwc->max_rh_port_speed = USB_SPEED_UNKNOWN;
 			dwc3_msm_update_bus_bw(mdwc, mdwc->default_bus_vote);
 		}
+	}
+
+	if (mdwc->auto_vbus_src_sel) {
+		if (event == USB_DEVICE_ADD &&
+		    dwc3_use_external_vbus_booster(udev, dwc, mdwc))
+			blocking_notifier_call_chain(&ext_vbus_notifier_list,
+						     EXT_VBUS_ON, NULL);
+		else
+			blocking_notifier_call_chain(&ext_vbus_notifier_list,
+						     EXT_VBUS_OFF, NULL);
 	}
 
 	return NOTIFY_DONE;
@@ -4510,7 +4567,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		atomic_read(&mdwc->dev->power.usage_count));
 
 	if (on) {
-		dev_err(mdwc->dev, "%s: turn on gadget %s\n",
+		dev_dbg(mdwc->dev, "%s: turn on gadget %s\n",
 					__func__, dwc->gadget.name);
 
 		dwc3_override_vbus_status(mdwc, true);
@@ -4577,47 +4634,40 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 	return 0;
 }
 
+/**
+ * dwc3_usb_blocking_sync - Waits until event is completed or maximum upto 1.5
+ * secs.
+ *
+ * @host_enable_event: Event can be start usb host or stop usb host.
+ */
 static int dwc3_usb_blocking_sync(struct notifier_block *nb,
-				unsigned long event, void *ptr)
+				unsigned long host_enable_event, void *ptr)
 {
 	struct dwc3 *dwc;
 	struct extcon_dev *edev = ptr;
 	struct extcon_nb *enb = container_of(nb, struct extcon_nb,
 						blocking_sync_nb);
 	struct dwc3_msm *mdwc = enb->mdwc;
-	int ret = 0;
+	unsigned long timeout_ms = jiffies +
+			msecs_to_jiffies(EXTCON_SYNC_EVENT_TIMEOUT_MS);
 
 	if (!edev || !mdwc)
 		return NOTIFY_DONE;
 
 	dwc = platform_get_drvdata(mdwc->dwc3);
-
 	dbg_event(0xFF, "fw_blocksync", 0);
-	flush_work(&mdwc->resume_work);
-	drain_workqueue(mdwc->sm_usb_wq);
 
-	if (!mdwc->in_host_mode && !mdwc->in_device_mode) {
-		dbg_event(0xFF, "lpm_state", atomic_read(&dwc->in_lpm));
+	do {
+		if (mdwc->drd_state == (host_enable_event ? DRD_STATE_HOST
+					: DRD_STATE_IDLE))
+			break;
+		msleep(50);
+	} while (time_before(jiffies, timeout_ms));
 
-		/*
-		 * stop host mode functionality performs autosuspend with mdwc
-		 * device, and it may take sometime to call PM runtime suspend.
-		 * Hence call pm_runtime_suspend() API to invoke PM runtime
-		 * suspend immediately to put USB controller and PHYs into
-		 * suspend.
-		 */
-		ret = pm_runtime_suspend(mdwc->dev);
-		dbg_event(0xFF, "pm_runtime_sus", ret);
+	if (!time_before(jiffies, timeout_ms))
+		dev_err(mdwc->dev, "TIMEOUT when changing the state\n");
 
-		/*
-		 * If mdwc device is already suspended, pm_runtime_suspend() API
-		 * returns 1, which is not error. Overwrite with zero if it is.
-		 */
-		if (ret > 0)
-			ret = 0;
-	}
-
-	return ret;
+	return 0;
 }
 
 static int get_psy_type(struct dwc3_msm *mdwc)
@@ -4837,8 +4887,6 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			mdwc->vbus_retry_count = 0;
 			work = 1;
 		} else {
-			mdwc->drd_state = DRD_STATE_HOST;
-
 			ret = dwc3_otg_start_host(mdwc, 1);
 			if ((ret == -EPROBE_DEFER) &&
 						mdwc->vbus_retry_count < 3) {
@@ -4846,15 +4894,15 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 				 * Get regulator failed as regulator driver is
 				 * not up yet. Will try to start host after 1sec
 				 */
-				mdwc->drd_state = DRD_STATE_HOST_IDLE;
 				dev_dbg(mdwc->dev, "Unable to get vbus regulator. Retrying...\n");
 				delay = VBUS_REG_CHECK_DELAY;
 				work = 1;
 				mdwc->vbus_retry_count++;
 			} else if (ret) {
 				dev_err(mdwc->dev, "unable to start host\n");
-				mdwc->drd_state = DRD_STATE_HOST_IDLE;
 				goto ret;
+			} else {
+				mdwc->drd_state = DRD_STATE_HOST;
 			}
 		}
 		break;

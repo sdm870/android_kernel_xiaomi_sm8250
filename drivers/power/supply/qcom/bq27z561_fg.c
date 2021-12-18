@@ -45,7 +45,13 @@ module_param_named(
 	debug_mask, debug_mask, int, 0600
 );
 
+#define FG_MAX_INDEX 2
+#define RETRY_COUNT	5
 #define	INVALID_REG_ADDR	0xFF
+
+#define MONITOR_WORK_10S	10
+#define MONITOR_WORK_5S		5
+
 
 #define FG_FLAGS_FD				BIT(4)
 #define	FG_FLAGS_FC				BIT(5)
@@ -64,6 +70,7 @@ module_param_named(
 #define BQ27Z561_DEFUALT_TERM		-200
 #define BQ27Z561_DEFUALT_FFC_TERM	-680
 #define BQ27Z561_DEFUALT_RECHARGE_VOL	4380
+#define DUAL_BQ27Z561_FFC_TERM		720
 
 #define PD_CHG_UPDATE_DELAY_US	20	/*20 sec*/
 #define BQ_I2C_FAILED_SOC	15
@@ -154,11 +161,15 @@ enum {
 
 
 enum bq_fg_device {
-	BQ27Z561 = 0,
+	BQ27Z561_MASTER = 0,
+	BQ27Z561_SLAVE,
+	BQ27Z561,
 	BQ28Z610,
 };
 
 static const unsigned char *device2str[] = {
+	"bq27z561_master",
+	"bq27z561_slave",
 	"bq27z561",
 	"bq28z610",
 };
@@ -214,7 +225,6 @@ struct bq_fg_chip {
 	int skip_writes;
 
 	int fake_soc;
-	int fake_temp;
 	int fake_volt;
 	int	fake_chip_ok;
 
@@ -250,6 +260,7 @@ struct bq_fg_chip {
 	bool	ffc_smooth;
 	bool	shutdown_delay;
 	bool	shutdown_delay_enable;
+	bool    force_soc_enable;
 
 	int cell1_max;
 	int max_charge_current;
@@ -262,6 +273,8 @@ struct bq_fg_chip {
 	int time_spent_in_ot;
 
 	int cell_ov_check;
+	/*add fuelgauge index*/
+	int fg_index;
 };
 
 #define bq_dbg(reason, fmt, ...)			\
@@ -277,6 +290,7 @@ static int bq_battery_soc_smooth_tracking(struct bq_fg_chip *chip,
 static int fg_get_raw_soc(struct bq_fg_chip *bq);
 static int fg_read_current(struct bq_fg_chip *bq, int *curr);
 static int fg_read_temperature(struct bq_fg_chip *bq);
+static int fg_check_full_status(struct bq_fg_chip *bq);
 /*
 static int __fg_read_byte(struct i2c_client *client, u8 reg, u8 *val)
 {
@@ -832,12 +846,19 @@ static int fg_get_manufacture_data(struct bq_fg_chip *bq)
 	int i;
 	int byte, base, step;
 
-	ret = fg_mac_read_block(bq, FG_MAC_CMD_MANU_NAME, t_buf, 32);
-	if (ret < 0) {
-		bq_dbg(PR_OEM, "failed to get MANE NAME\n");
-		/* for draco p0 and p0.1 */
-		if (bq->ignore_digest_for_debug)
-			bq->old_hw = true;
+	for(i = 0; i < RETRY_COUNT; i++) {
+		ret = fg_mac_read_block(bq, FG_MAC_CMD_MANU_NAME, t_buf, 32);
+		if (ret < 0) {
+			bq_dbg(PR_OEM, "failed to get MANE NAME\n");
+			/* for draco p0 and p0.1 */
+			if (bq->ignore_digest_for_debug)
+				bq->old_hw = true;
+			msleep(300);
+		} else {
+			if (bq->ignore_digest_for_debug)
+				bq->old_hw = false;
+			break;
+		}
 	}
 
 	if (strncmp(t_buf, "MI", 2) != 0) {
@@ -907,20 +928,17 @@ static int fg_read_temperature(struct bq_fg_chip *bq)
 {
 	int ret;
 	u16 temp = 0;
-	static int last_temp;
-
-	if (bq->fake_temp > 0)
-		return bq->fake_temp;
+	static int last_temp[FG_MAX_INDEX];
 
 	if (bq->skip_reads)
-		return last_temp;
+		return last_temp[bq->fg_index];
 
 	ret = fg_read_word(bq, bq->regs[BQ_FG_REG_TEMP], &temp);
 	if (ret < 0) {
 		bq_dbg(PR_OEM, "could not read temperature, ret = %d\n", ret);
 		return BQ_I2C_FAILED_TEMP;
 	}
-	last_temp = temp - 2730;
+	last_temp[bq->fg_index] = temp - 2730;
 
 	return temp - 2730;
 
@@ -1170,40 +1188,6 @@ static int fg_get_batt_capacity_level(struct bq_fg_chip *bq)
 
 }
 
-static int fg_get_soc_decimal_rate(struct bq_fg_chip *bq)
-{
-	int soc, i;
-
-	if (bq->dec_rate_len <= 0)
-		return 0;
-
-	soc = fg_read_rsoc(bq);
-
-	for (i = 0; i < bq->dec_rate_len; i += 2) {
-		if (soc < bq->dec_rate_seq[i]) {
-			return bq->dec_rate_seq[i - 1];
-		}
-	}
-
-	return bq->dec_rate_seq[bq->dec_rate_len - 1];
-}
-
-static int fg_get_soc_decimal(struct bq_fg_chip *bq)
-{
-	int rsoc, raw_soc;
-
-	if (!bq)
-		return 0;
-
-	rsoc = fg_read_rsoc(bq);
-	raw_soc = fg_get_raw_soc(bq);
-
-	if (bq->batt_soc > rsoc)
-		return 0;
-
-	return raw_soc % 100;
-}
-
 static int fg_get_cold_thermal_level(struct bq_fg_chip *bq)
 {
 	union power_supply_propval pval = {0, };
@@ -1276,8 +1260,6 @@ static enum power_supply_property fg_props[] = {
 	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
 	POWER_SUPPLY_PROP_SHUTDOWN_DELAY,
 	POWER_SUPPLY_PROP_CAPACITY_RAW,
-	POWER_SUPPLY_PROP_SOC_DECIMAL,
-	POWER_SUPPLY_PROP_SOC_DECIMAL_RATE,
 	POWER_SUPPLY_PROP_COLD_THERMAL_LEVEL,
 	POWER_SUPPLY_PROP_TEMP,
 	/*POWER_SUPPLY_PROP_HEALTH,*//*implement it in battery power_supply*/
@@ -1310,10 +1292,10 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 	struct bq_fg_chip *bq = power_supply_get_drvdata(psy);
 	int ret, status;
 	u16 flags;
-	static int ov_count;
+	static int ov_count[FG_MAX_INDEX];
 	int vbat_mv;
-	static bool shutdown_delay_cancel;
-	static bool last_shutdown_delay;
+	static bool shutdown_delay_cancel[FG_MAX_INDEX];
+	static bool last_shutdown_delay[FG_MAX_INDEX];
 	union power_supply_propval pval = {0, };
 
 	switch (psp) {
@@ -1360,6 +1342,13 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 			break;
 		}
 		val->intval = fg_read_system_soc(bq);
+
+		if (bq->force_soc_enable) {
+			vbat_mv = fg_read_volt(bq);
+			if (val->intval == 0 && vbat_mv > 4000)
+				val->intval = 10;
+		}
+
 		bq->batt_soc = val->intval;
 
 		//add shutdown delay feature
@@ -1378,20 +1367,20 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 				} else if (status == POWER_SUPPLY_STATUS_CHARGING
 								&& bq->shutdown_delay) {
 					bq->shutdown_delay = false;
-					shutdown_delay_cancel = true;
+					shutdown_delay_cancel[bq->fg_index] = true;
 					val->intval = 1;
 				} else {
 					bq->shutdown_delay = false;
-					if (shutdown_delay_cancel)
+					if (shutdown_delay_cancel[bq->fg_index])
 						val->intval = 1;
 				}
 			} else {
 				bq->shutdown_delay = false;
-				shutdown_delay_cancel = false;
+				shutdown_delay_cancel[bq->fg_index] = false;
 			}
 
-			if (last_shutdown_delay != bq->shutdown_delay) {
-				last_shutdown_delay = bq->shutdown_delay;
+			if (last_shutdown_delay[bq->fg_index] != bq->shutdown_delay) {
+				last_shutdown_delay[bq->fg_index] = bq->shutdown_delay;
 				if (bq->fg_psy)
 					power_supply_changed(bq->fg_psy);
 			}
@@ -1406,20 +1395,10 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 	case POWER_SUPPLY_PROP_CAPACITY_RAW:
 		val->intval = bq->raw_soc;
 		break;
-	case POWER_SUPPLY_PROP_SOC_DECIMAL:
-		val->intval = fg_get_soc_decimal(bq);
-		break;
-	case POWER_SUPPLY_PROP_SOC_DECIMAL_RATE:
-		val->intval = fg_get_soc_decimal_rate(bq);
-		break;
 	case POWER_SUPPLY_PROP_COLD_THERMAL_LEVEL:
 		val->intval = fg_get_cold_thermal_level(bq);
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
-		if (bq->fake_temp != -EINVAL) {
-			val->intval = bq->fake_temp;
-			break;
-		}
 		if (bq->old_hw) {
 			val->intval = 250;
 			break;
@@ -1505,20 +1484,22 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 		val->intval = fg_read_charging_voltage(bq);
 		if (val->intval == BQ_MAXIUM_VOLTAGE_FOR_CELL) {
 			if (bq->batt_volt > BQ_PACK_MAXIUM_VOLTAGE_FOR_PMIC_SAFETY) {
-				ov_count++;
-				if (ov_count > 2) {
-					ov_count = 0;
+				ov_count[bq->fg_index]++;
+				if (ov_count[bq->fg_index] > 2) {
+					ov_count[bq->fg_index] = 0;
 					bq->cell_ov_check++;
 				}
 			} else {
-				ov_count = 0;
+				ov_count[bq->fg_index] = 0;
 			}
 			if (bq->cell_ov_check > 4)
 				bq->cell_ov_check = 4;
 
 			val->intval = BQ_PACK_MAXIUM_VOLTAGE_FOR_PMIC - bq->cell_ov_check * 10;
+#ifndef CONFIG_DUAL_FUEL_GAUGE_BQ27Z561
 			if ((bq->batt_soc == 100) && (val->intval == BQ_PACK_MAXIUM_VOLTAGE_FOR_PMIC))
 				val->intval = BQ_MAXIUM_VOLTAGE_FOR_CELL;
+#endif
 		}
 		val->intval *= 1000;
 		break;
@@ -1563,6 +1544,9 @@ static int fg_get_property(struct power_supply *psy, enum power_supply_property 
 		break;
 	case POWER_SUPPLY_PROP_FFC_TERMINATION_CURRENT:
 		val->intval = manu_info[FFC_TERMINATION].data * 90 / 100;
+#ifdef CONFIG_DUAL_FUEL_GAUGE_BQ27Z561
+		val->intval = DUAL_BQ27Z561_FFC_TERM;
+#endif
 		val->intval = val->intval * (-1);
 		break;
 	case POWER_SUPPLY_PROP_RECHARGE_VBAT:
@@ -1587,9 +1571,6 @@ static int fg_set_property(struct power_supply *psy,
 	struct bq_fg_chip *bq = power_supply_get_drvdata(psy);
 
 	switch (prop) {
-	case POWER_SUPPLY_PROP_TEMP:
-		bq->fake_temp = val->intval;
-		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		bq->fake_soc = val->intval;
 		power_supply_changed(bq->fg_psy);
@@ -1599,10 +1580,12 @@ static int fg_set_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_AUTHENTIC:
 		bq->verify_digest_success = !!val->intval;
+#ifndef CONFIG_DUAL_FUEL_GAUGE_BQ27Z561
 		if (!bq->fcc_votable)
 			bq->fcc_votable = find_votable("FCC");
 		vote(bq->fcc_votable, BMS_FG_VERIFY, !bq->verify_digest_success,
 				!bq->verify_digest_success ? 2000000 : 0);
+#endif
 		break;
 	case POWER_SUPPLY_PROP_CHIP_OK:
 		bq->fake_chip_ok = !!val->intval;
@@ -1653,7 +1636,12 @@ static int fg_psy_register(struct bq_fg_chip *bq)
 {
 	struct power_supply_config fg_psy_cfg = {};
 
-	bq->fg_psy_d.name = "bms";
+	if (bq->chip == BQ27Z561_MASTER )
+		bq->fg_psy_d.name = "bms_master";
+	else if (bq->chip == BQ27Z561_SLAVE)
+		bq->fg_psy_d.name = "bms_slave";
+	else 
+		bq->fg_psy_d.name = "bms";
 	bq->fg_psy_d.type = POWER_SUPPLY_TYPE_BMS;
 	bq->fg_psy_d.properties = fg_props;
 	bq->fg_psy_d.num_properties = ARRAY_SIZE(fg_props);
@@ -2159,7 +2147,9 @@ static int fg_get_lifetime_data(struct bq_fg_chip *bq)
 
 static void fg_update_status(struct bq_fg_chip *bq)
 {
-	static int last_st, last_soc, last_temp;
+	static int last_st[FG_MAX_INDEX];
+	static int last_soc[FG_MAX_INDEX];
+	static int last_temp[FG_MAX_INDEX];
 	mutex_lock(&bq->data_lock);
 
 	bq->batt_soc = fg_read_system_soc(bq);
@@ -2173,24 +2163,24 @@ static void fg_update_status(struct bq_fg_chip *bq)
 	fg_get_lifetime_data(bq);
 
 	mutex_unlock(&bq->data_lock);
-
+#ifndef CONFIG_DUAL_FUEL_GAUGE_BQ27Z561
 	bq_dbg(PR_OEM, "SOC:%d,Volt:%d,Cur:%d,Temp:%d,RM:%d,FC:%d,FAST:%d",
 			bq->batt_soc, bq->batt_volt, bq->batt_curr,
 			bq->batt_temp, bq->batt_rm, bq->batt_fcc, bq->fast_mode);
+#endif
 
-	if ((last_soc != bq->batt_soc) || (last_temp != bq->batt_temp)
-			|| (last_st != bq->batt_st)) {
+	if ((last_soc[bq->fg_index] != bq->batt_soc) || (last_temp[bq->fg_index] != bq->batt_temp)
+			|| (last_st[bq->fg_index] != bq->batt_st)) {
 		if (bq->fg_psy)
 			power_supply_changed(bq->fg_psy);
 	}
 	if (bq->batt_st == POWER_SUPPLY_STATUS_DISCHARGING)
 		bq->cell_ov_check = 0;
 
-	last_soc = bq->batt_soc;
-	last_temp = bq->batt_temp;
-	last_st = bq->batt_st;
+	last_soc[bq->fg_index] = bq->batt_soc;
+	last_temp[bq->fg_index] = bq->batt_temp;
+	last_st[bq->fg_index] = bq->batt_st;
 }
-
 
 static int fg_get_raw_soc(struct bq_fg_chip *bq)
 {
@@ -2225,10 +2215,10 @@ static int fg_update_charge_full(struct bq_fg_chip *bq)
 	rc = power_supply_get_property(bq->batt_psy,
 		POWER_SUPPLY_PROP_HEALTH, &prop);
 	bq->health = prop.intval;
-
+#ifndef CONFIG_DUAL_FUEL_GAUGE_BQ27Z561
 	bq_dbg(PR_OEM, "raw:%d,done:%d,full:%d,health:%d\n",
 			bq->raw_soc, bq->charge_done, bq->charge_full, bq->health);
-
+#endif
 	if (bq->charge_done && !bq->charge_full) {
 		if (bq->raw_soc >= BQ_REPORT_FULL_SOC) {
 			bq_dbg(PR_OEM, "Setting charge_full to true\n");
@@ -2247,12 +2237,15 @@ static int fg_update_charge_full(struct bq_fg_chip *bq)
 
 	if ((bq->raw_soc <= BQ_RECHARGE_SOC) && bq->charge_done && bq->health != POWER_SUPPLY_HEALTH_WARM) {
 		prop.intval = true;
+#ifndef CONFIG_DUAL_FUEL_GAUGE_BQ27Z561
 		rc = power_supply_set_property(bq->batt_psy,
 				POWER_SUPPLY_PROP_FORCE_RECHARGE, &prop);
 		if (rc < 0) {
 			bq_dbg(PR_OEM, "bq could not set force recharging!\n");
 			return rc;
+
 		}
+#endif
 	}
 
 out:
@@ -2295,9 +2288,11 @@ static int calc_delta_time(ktime_t time_last, int *delta_time)
 #define LOW_TEMP_DISCHARGING_DELTA	20000
 #define FFC_SMOOTH_LEN			4
 #define FG_RAW_SOC_FULL			10000
-#define FG_REPORT_FULL_SOC		9400
+#define FG_REPORT_FULL_SOC_PHONE	9400
+#define FG_REPORT_FULL_SOC_DEVICE	9500
 #define FG_OPTIMIZ_FULL_TIME		64000
 
+static int FG_REPORT_FULL_SOC;
 struct ffc_smooth {
 	int curr_lim;
 	int time;
@@ -2313,23 +2308,29 @@ struct ffc_smooth ffc_dischg_smooth[FFC_SMOOTH_LEN] = {
 static int bq_battery_soc_smooth_tracking(struct bq_fg_chip *bq,
 		int raw_soc, int batt_soc, int batt_temp, int batt_ma)
 {
-	static int last_batt_soc = -1, system_soc, cold_smooth;
-	static int last_status;
+	//static int last_batt_soc = -1, system_soc, cold_smooth;
+	//static int last_status;
+	static int last_batt_soc[FG_MAX_INDEX]={-1,-1};
+	static int system_soc[FG_MAX_INDEX];
+	static int cold_smooth[FG_MAX_INDEX];
+	static int last_status[FG_MAX_INDEX];
 	int change_delta = 0, rc;
 	int optimiz_delta = 0, status;
-	static ktime_t last_change_time;
-	static ktime_t last_optimiz_time;
+	static ktime_t last_change_time[FG_MAX_INDEX];
+	static ktime_t last_optimiz_time[FG_MAX_INDEX];
 	int unit_time = 0;
 	int soc_changed = 0, delta_time = 0;
-	static int optimiz_soc, last_raw_soc;
+	//static int optimiz_soc, last_raw_soc;
+	static int optimiz_soc[FG_MAX_INDEX];
+	static int last_raw_soc[FG_MAX_INDEX];
 	union power_supply_propval pval = {0, };
 	int batt_ma_avg, i;
 
 	if (bq->optimiz_soc > 0) {
 		bq->ffc_smooth = true;
-		last_batt_soc = bq->optimiz_soc;
-		system_soc = bq->optimiz_soc;
-		last_change_time = ktime_get();
+		last_batt_soc[bq->fg_index] = bq->optimiz_soc;
+		system_soc[bq->fg_index] = bq->optimiz_soc;
+		last_change_time[bq->fg_index] = ktime_get();
 		bq->optimiz_soc = 0;
 	}
 
@@ -2344,8 +2345,8 @@ static int bq_battery_soc_smooth_tracking(struct bq_fg_chip *bq,
 		}
 	}
 
-	if (last_batt_soc < 0)
-		last_batt_soc = batt_soc;
+	if (last_batt_soc[bq->fg_index] < 0)
+		last_batt_soc[bq->fg_index] = batt_soc;
 
 	if (raw_soc == FG_RAW_SOC_FULL)
 		bq->ffc_smooth = false;
@@ -2358,50 +2359,50 @@ static int bq_battery_soc_smooth_tracking(struct bq_fg_chip *bq,
 			return -EINVAL;
 		}
 		status = pval.intval;
-		if (batt_soc == system_soc) {
+		if (batt_soc == system_soc[bq->fg_index]) {
 			bq->ffc_smooth = false;
 			return batt_soc;
 		}
-		if (status != last_status) {
-			if (last_status == POWER_SUPPLY_STATUS_CHARGING
+		if (status != last_status[bq->fg_index]) {
+			if (last_status[bq->fg_index] == POWER_SUPPLY_STATUS_CHARGING
 					&& status == POWER_SUPPLY_STATUS_DISCHARGING)
-				last_change_time = ktime_get();
-			last_status = status;
+				last_change_time[bq->fg_index] = ktime_get();
+			last_status[bq->fg_index] = status;
 		}
 	}
 
 	if (bq->fast_mode && raw_soc >= FG_REPORT_FULL_SOC && raw_soc != FG_RAW_SOC_FULL) {
-		if (last_optimiz_time == 0)
-			last_optimiz_time = ktime_get();
-		calc_delta_time(last_optimiz_time, &optimiz_delta);
+		if (last_optimiz_time[bq->fg_index] == 0)
+			last_optimiz_time[bq->fg_index] = ktime_get();
+		calc_delta_time(last_optimiz_time[bq->fg_index], &optimiz_delta);
 		delta_time = optimiz_delta / FG_OPTIMIZ_FULL_TIME;
 		soc_changed = min(1, delta_time);
-		if (raw_soc > last_raw_soc && soc_changed) {
-			last_raw_soc = raw_soc;
-			optimiz_soc += soc_changed;
-			last_optimiz_time = ktime_get();
+		if (raw_soc > last_raw_soc[bq->fg_index] && soc_changed) {
+			last_raw_soc[bq->fg_index] = raw_soc;
+			optimiz_soc[bq->fg_index] += soc_changed;
+			last_optimiz_time[bq->fg_index] = ktime_get();
 			bq_dbg(PR_DEBUG, "optimiz_soc:%d, last_optimiz_time%ld\n",
-					optimiz_soc, last_optimiz_time);
-			if (optimiz_soc > 100)
-				optimiz_soc = 100;
+					optimiz_soc[bq->fg_index], last_optimiz_time[bq->fg_index]);
+			if (optimiz_soc[bq->fg_index] > 100)
+				optimiz_soc[bq->fg_index] = 100;
 			bq->ffc_smooth = true;
 		}
-		if (batt_soc > optimiz_soc) {
-			optimiz_soc = batt_soc;
-			last_optimiz_time = ktime_get();
+		if (batt_soc > optimiz_soc[bq->fg_index]) {
+			optimiz_soc[bq->fg_index] = batt_soc;
+			last_optimiz_time[bq->fg_index] = ktime_get();
 		}
 		if (bq->ffc_smooth)
-			batt_soc = optimiz_soc;
-		last_change_time = ktime_get();
+			batt_soc = optimiz_soc[bq->fg_index];
+		last_change_time[bq->fg_index] = ktime_get();
 	} else {
-		optimiz_soc = batt_soc + 1;
-		last_raw_soc = raw_soc;
-		last_optimiz_time = ktime_get();
+		optimiz_soc[bq->fg_index] = batt_soc + 1;
+		last_raw_soc[bq->fg_index] = raw_soc;
+		last_optimiz_time[bq->fg_index] = ktime_get();
 	}
 
-	calc_delta_time(last_change_time, &change_delta);
+	calc_delta_time(last_change_time[bq->fg_index], &change_delta);
 	fg_read_avg_current(bq, &batt_ma_avg);
-	if (batt_temp > BATT_COOL_THRESHOLD && !cold_smooth && batt_soc != 0) {
+	if (batt_temp > BATT_COOL_THRESHOLD && !cold_smooth[bq->fg_index] && batt_soc != 0) {
 		if (bq->ffc_smooth && (status == POWER_SUPPLY_STATUS_DISCHARGING ||
 					status == POWER_SUPPLY_STATUS_NOT_CHARGING ||
 					batt_ma_avg > 50)) {
@@ -2422,10 +2423,10 @@ static int bq_battery_soc_smooth_tracking(struct bq_fg_chip *bq,
 			unit_time = LOW_TEMP_CHARGING_DELTA;
 		else
 			unit_time = LOW_TEMP_DISCHARGING_DELTA;
-		if (batt_soc != last_batt_soc)
-			cold_smooth = true;
+		if (batt_soc != last_batt_soc[bq->fg_index])
+			cold_smooth[bq->fg_index] = true;
 		else
-			cold_smooth = false;
+			cold_smooth[bq->fg_index] = false;
 	}
 	if (unit_time > 0) {
 		delta_time = change_delta / unit_time;
@@ -2436,54 +2437,78 @@ static int bq_battery_soc_smooth_tracking(struct bq_fg_chip *bq,
 	}
 
 	bq_dbg(PR_DEBUG, "batt_ma_avg:%d, batt_ma:%d, cold_smooth:%d, optimiz_soc:%d",
-			batt_ma_avg, batt_ma, cold_smooth, optimiz_soc);
+			batt_ma_avg, batt_ma, cold_smooth[bq->fg_index], optimiz_soc[bq->fg_index]);
 	bq_dbg(PR_DEBUG, "delta_time:%d, change_delta:%d, unit_time:%d"
 			" soc_changed:%d, bq->update_now:%d, bq->ffc_smooth",
 			delta_time, change_delta, unit_time,
 			soc_changed, bq->update_now, bq->ffc_smooth);
 
-	if (last_batt_soc < batt_soc && batt_ma < 0)
+	if (last_batt_soc[bq->fg_index] < batt_soc && batt_ma < 0)
 		/* Battery in charging status
 		 * update the soc when resuming device
 		 */
-		last_batt_soc = bq->update_now ?
-			batt_soc : last_batt_soc + soc_changed;
-	else if (last_batt_soc > batt_soc && batt_ma > 0) {
+		last_batt_soc[bq->fg_index] = bq->update_now ?
+			batt_soc : last_batt_soc[bq->fg_index] + soc_changed;
+	else if (last_batt_soc[bq->fg_index] > batt_soc && batt_ma > 0) {
 		/* Battery in discharging status
 		 * update the soc when resuming device
 		 */
-		last_batt_soc = bq->update_now ?
-			batt_soc : last_batt_soc - soc_changed;
+		last_batt_soc[bq->fg_index] = bq->update_now ?
+			batt_soc : last_batt_soc[bq->fg_index] - soc_changed;
 	}
 	bq->update_now = false;
 
-	if (system_soc != last_batt_soc) {
-		system_soc = last_batt_soc;
-		last_change_time = ktime_get();
+	if (system_soc[bq->fg_index] != last_batt_soc[bq->fg_index]) {
+		system_soc[bq->fg_index] = last_batt_soc[bq->fg_index];
+		last_change_time[bq->fg_index] = ktime_get();
 	}
 
 	bq_dbg(PR_DEBUG, "raw_soc:%d batt_soc:%d,last_batt_soc:%d,system_soc:%d"
 			" bq->fast_mode:%d",
-			raw_soc, batt_soc, last_batt_soc, system_soc,
+			raw_soc, batt_soc, last_batt_soc[bq->fg_index], system_soc[bq->fg_index],
 			bq->fast_mode);
 
-	return system_soc;
+	return system_soc[bq->fg_index];
 }
-
+static int fg_check_full_status(struct bq_fg_chip *bq)
+{
+	union power_supply_propval prop = {0, };
+	int rc;
+	int interval = MONITOR_WORK_10S;
+	if(!bq->usb_psy) {
+		bq->usb_psy = power_supply_get_by_name("usb");
+		if (!bq->usb_psy) {
+			return interval;
+		}
+	}
+	rc = power_supply_get_property(bq->usb_psy,
+			POWER_SUPPLY_PROP_PRESENT, &prop);
+	if(rc < 0 || !prop.intval)
+		return interval;
+		/*NON-FFC charging,status = FULL,fg_slave reports 100 in time */
+	if(!bq->fast_mode && prop.intval && bq->raw_soc >= BQ_REPORT_FULL_SOC) {	
+		if(bq->batt_soc < 100)
+			interval = MONITOR_WORK_5S;
+		else if(bq->batt_soc == 100)
+			interval = MONITOR_WORK_10S;
+	}
+	return interval;
+}
 static void fg_monitor_workfunc(struct work_struct *work)
 {
 	struct bq_fg_chip *bq = container_of(work, struct bq_fg_chip, monitor_work.work);
 	int rc;
-
+	int period = MONITOR_WORK_10S;
 	if (!bq->old_hw) {
 		rc = fg_dump_registers(bq);
 		/*if (rc < 0)
 			return;*/
 		fg_update_status(bq);
+		period = fg_check_full_status(bq);
 		fg_update_charge_full(bq);
 	}
 
-	schedule_delayed_work(&bq->monitor_work, 10 * HZ);
+	schedule_delayed_work(&bq->monitor_work, period * HZ);
 }
 static int bq_parse_dt(struct bq_fg_chip *bq)
 {
@@ -2511,6 +2536,9 @@ static int bq_parse_dt(struct bq_fg_chip *bq)
 
 	bq->shutdown_delay_enable = of_property_read_bool(node,
 						"bq,shutdown-delay-enable");
+
+	bq->force_soc_enable = of_property_read_bool(node,
+						"bq,force-soc-enable");
 
 	size = 0;
 	of_get_property(node, "bq,soc_decimal_rate", &size);
@@ -2598,15 +2626,24 @@ static int bq_fg_probe(struct i2c_client *client,
 	bq->cell_ov_check = 0;
 
 	bq->fake_soc	= -EINVAL;
-	bq->fake_temp	= -EINVAL;
 	bq->fake_volt	= -EINVAL;
 	bq->fake_chip_ok = -EINVAL;
+#ifdef CONFIG_DUAL_FUEL_GAUGE_BQ27Z561
+	FG_REPORT_FULL_SOC = FG_REPORT_FULL_SOC_DEVICE;
+#else
+	FG_REPORT_FULL_SOC = FG_REPORT_FULL_SOC_PHONE;
+#endif
 
-	if (bq->chip == BQ27Z561) {
+	if (bq->chip == BQ27Z561 || bq->chip == BQ27Z561_MASTER || bq->chip == BQ27Z561_SLAVE) {
 		regs = bq27z561_regs;
 	} else {
 		bq_dbg(PR_OEM, "unexpected fuel gauge: %d\n", bq->chip);
 		regs = bq27z561_regs;
+	}
+	if(bq->chip == BQ27Z561_SLAVE){
+		bq->fg_index = 1;
+	} else {
+		bq->fg_index = 0;
 	}
 	memcpy(bq->regs, regs, NUM_REGS);
 
@@ -2696,6 +2733,8 @@ static void bq_fg_shutdown(struct i2c_client *client)
 }
 
 static struct of_device_id bq_fg_match_table[] = {
+	{.compatible = "ti,bq27z561_master",},
+	{.compatible = "ti,bq27z561_slave",},
 	{.compatible = "ti,bq27z561",},
 	{.compatible = "ti,bq28z610",},
 	{},
@@ -2703,6 +2742,8 @@ static struct of_device_id bq_fg_match_table[] = {
 MODULE_DEVICE_TABLE(of, bq_fg_match_table);
 
 static const struct i2c_device_id bq_fg_id[] = {
+	{ "bq27z561_master", BQ27Z561_MASTER },
+	{ "bq27z561_slave", BQ27Z561_SLAVE },
 	{ "bq27z561", BQ27Z561 },
 	{ "bq28z610", BQ28Z610 },
 	{},

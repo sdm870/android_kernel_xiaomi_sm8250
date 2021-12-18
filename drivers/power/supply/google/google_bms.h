@@ -18,7 +18,9 @@
 #define __GOOGLE_BMS_H_
 
 #include <linux/types.h>
+#include <linux/power_supply.h>
 #include "qmath.h"
+#include "gbms_storage.h"
 
 struct device_node;
 
@@ -106,6 +108,7 @@ enum gbms_msc_states_t {
 	MSC_NEXT,	/* in taper */
 	MSC_NYET,	/* in taper */
 	MSC_HEALTH,
+	MSC_HEALTH_PAUSE,
 	MSC_STATES_COUNT,
 };
 
@@ -210,9 +213,9 @@ struct batt_ttf_stats {
  *	deadline = 0, rest_state = CHG_HEALTH_INACTIVE
  *
  * deadline = -1 from userspace
- *	CHG_HEALTH_* -> CHG_HEALTH_USER_DISABLED
+ *	CHG_HEALTH_* -> CHG_HEALTH_USER_DISABLED (settings disabled)
  * on deadline = 0 from userspace
- *	CHG_HEALTH_* -> CHG_HEALTH_USER_DISABLED
+ *	CHG_HEALTH_* -> CHG_HEALTH_USER_DISABLED (alarm, plug or misc. disabled)
  * on deadline > 0 from userspace
  *	CHG_HEALTH_* -> CHG_HEALTH_ENABLED
  *
@@ -226,26 +229,74 @@ struct batt_ttf_stats {
  *	CHG_HEALTH_ACTIVE   -> CHG_HEALTH_DONE
  */
 enum chg_health_state {
+	CHG_HEALTH_CCLVL_DISABLED = -6,
+	CHG_HEALTH_BD_DISABLED = -5,
 	CHG_HEALTH_USER_DISABLED = -3,
 	CHG_HEALTH_DISABLED = -2,
 	CHG_HEALTH_DONE = -1,
 	CHG_HEALTH_INACTIVE = 0,
 	CHG_HEALTH_ENABLED,
 	CHG_HEALTH_ACTIVE,
+	CHG_HEALTH_PAUSE,
 };
 
 /* tier index used to log the session */
-enum gbms_stats_ac_tier_idx_t {
-	GBMS_STATS_AC_TI_DISABLE = -4,
-	GBMS_STATS_AC_TI_PLUG = -3,
-	GBMS_STATS_AC_TI_SETTING = -2,
+enum gbms_stats_tier_idx_t {
+	GBMS_STATS_AC_TI_DEFENDER = -5,
+	GBMS_STATS_AC_TI_DISABLE_SETTING_STOP = -4,
+	GBMS_STATS_AC_TI_DISABLE_MISC = -3,
+	GBMS_STATS_AC_TI_DISABLE_SETTING = -2,
 	GBMS_STATS_AC_TI_INVALID = -1,
+
+	/* Regular charge tiers 0 -> 9 */
 	GBMS_STATS_AC_TI_VALID = 10,
-	GBMS_STATS_AC_TI_DISABLED,
-	GBMS_STATS_AC_TI_ENABLED,
-	GBMS_STATS_AC_TI_ACTIVE,
+	GBMS_STATS_AC_TI_DISABLED = 11,
+	GBMS_STATS_AC_TI_ENABLED = 12,
+	GBMS_STATS_AC_TI_ACTIVE = 13,
+	GBMS_STATS_AC_TI_ENABLED_AON = 14,
+	GBMS_STATS_AC_TI_ACTIVE_AON = 15,
+	GBMS_STATS_AC_TI_PAUSE = 16,
+	GBMS_STATS_AC_TI_PAUSE_AON = 17,
+	GBMS_STATS_AC_TI_V2_PREDICT = 18,
+	GBMS_STATS_AC_TI_V2_PREDICT_SUCCESS = 19,
+
+	/* TODO: rename, these are not really related to AC */
+	GBMS_STATS_AC_TI_FULL_CHARGE = 100,
+	GBMS_STATS_AC_TI_HIGH_SOC = 101,
+
+	/* Defender TEMP or DWELL */
+	GBMS_STATS_BD_TI_OVERHEAT_TEMP = 110,
+	GBMS_STATS_BD_TI_CUSTOM_LEVELS = 111,
+	GBMS_STATS_BD_TI_TRICKLE = 112,
+
+	GBMS_STATS_BD_TI_TRICKLE_CLEARED = 122,
 };
 
+/* health state */
+struct batt_chg_health {
+	int rest_soc;		/* entry criteria */
+	int rest_voltage;	/* entry criteria */
+	int always_on_soc;	/* entry criteria */
+
+	time_t rest_deadline;	/* full by this in seconds */
+	time_t dry_run_deadline; /* full by this in seconds (prediction) */
+	int rest_rate;		/* centirate once enter */
+
+	enum chg_health_state rest_state;
+	int rest_cc_max;
+	int rest_fv_uv;
+};
+
+#define CHG_HEALTH_REST_IS_ACTIVE(rest) \
+	((rest)->rest_state == CHG_HEALTH_ACTIVE)
+
+#define CHG_HEALTH_REST_IS_PAUSE(rest) \
+	((rest)->rest_state == CHG_HEALTH_PAUSE)
+
+#define CHG_HEALTH_REST_SOC(rest) (((rest)->always_on_soc != -1) ? \
+			(rest)->always_on_soc : (rest)->rest_soc)
+
+/* reset on every charge session */
 struct gbms_charging_event {
 	union gbms_ce_adapter_details	adapter_details;
 
@@ -261,27 +312,35 @@ struct gbms_charging_event {
 
 	time_t first_update;
 	time_t last_update;
-	uint32_t chg_sts_qual_time;
-	uint32_t chg_sts_delta_soc;
+	bool bd_clear_trickle;
 
 	/* health based charging */
-	struct gbms_ce_tier_stats	health_stats;
-	enum chg_health_state		rest_state;
-	time_t rest_deadline;
+	struct batt_chg_health		ce_health;	/* updated on close */
+	struct gbms_ce_tier_stats	health_stats;	/* updated in HC */
+	/* updated in HCP */
+	struct gbms_ce_tier_stats	health_pause_stats;
+	/* updated on sysfs */
+	struct gbms_ce_tier_stats health_dryrun_stats;
+
+	/* other stats */
+	struct gbms_ce_tier_stats full_charge_stats;
+	struct gbms_ce_tier_stats high_soc_stats;
+
+	struct gbms_ce_tier_stats overheat_stats;
+	struct gbms_ce_tier_stats cc_lvl_stats;
+	struct gbms_ce_tier_stats trickle_stats;
 };
 
 #define GBMS_CCCM_LIMITS(profile, ti, vi) \
 	profile->cccm_limits[(ti * profile->volt_nb_limits) + vi]
 
 /* newgen charging */
-#define GBMS_CS_FLAG_BUCK_EN    (1 << 0)
-#define GBMS_CS_FLAG_DONE       (1 << 1)
-#define GBMS_CS_FLAG_CC       	(1 << 2)
-#define GBMS_CS_FLAG_CV       	(1 << 3)
-#define GBMS_CS_FLAG_ILIM       (1 << 4)
-
-// This value must be greater than the threshold set in individual chargers
-#define GBMS_ICL_MIN 100000 // 100 mA
+#define GBMS_CS_FLAG_BUCK_EN	BIT(0)
+#define GBMS_CS_FLAG_DONE	BIT(1)
+#define GBMS_CS_FLAG_CC		BIT(2)
+#define GBMS_CS_FLAG_CV		BIT(3)
+#define GBMS_CS_FLAG_ILIM	BIT(4)
+#define GBMS_CS_FLAG_CCLVL	BIT(5)
 
 union gbms_charger_state {
 	uint64_t v;
@@ -315,6 +374,10 @@ int gbms_msc_round_fv_uv(const struct gbms_chg_profile *profile,
 
 /* newgen charging: charger flags  */
 uint8_t gbms_gen_chg_flags(int chg_status, int chg_type);
+/* newgen charging: read/gen charger state  */
+int gbms_read_charger_state(union gbms_charger_state *chg_state,
+			    struct power_supply *chg_psy,
+			    struct power_supply *wlc_psy);
 
 /* debug/print */
 const char *gbms_chg_type_s(int chg_type);
@@ -348,6 +411,7 @@ int gbms_cycle_count_cstr_bc(char *buff, size_t size,
 
 #define gbms_cycle_count_cstr(buff, size, cc)	\
 	gbms_cycle_count_cstr_bc(buff, size, cc, GBMS_CCBIN_BUCKET_COUNT)
+
 
 /* Time to full */
 int ttf_soc_cstr(char *buff, int size, const struct ttf_soc_stats *soc_stats,
@@ -389,173 +453,7 @@ void ttf_log(const struct batt_ttf_stats *stats, const char *fmt, ...);
 ssize_t ttf_dump_details(char *buf, int max_size,
 			 const struct batt_ttf_stats *ttf_stats,
 			 int last_soc);
-/**
- * GBMS Storage API
- * The API provides functions to access to data stored in the persistent and
- * semi-persistent storage of a device in a cross-platform and
- * location-independent fashion. Clients in kernel and userspace use this
- * directly and indirectly to retrieve battery serial number, cell chemistry
- * type, cycle bin count, battery lifetime history and other battery related
- * data.
- */
 
-#define GBMS_STORAGE_ADDR_INVALID	-1
-#define GBMS_STORAGE_INDEX_INVALID	-1
-
-/* Battery Google Part Number */
-#define GBMS_BGPN_LEN	10
-/* Battery manufacturer info length */
-#define GBMS_MINF_LEN	32
-/* Battery device info length */
-#define GBMS_DINF_LEN	32
-/* Battery cycle count bin length */
-#define GBMS_CNTB_LEN	16
-
-/**
- * Tags are u32 constants: hardcoding as hex since characters constants of more
- * than one byte such as 'BGCE' are frown upon.
- */
-typedef uint32_t gbms_tag_t;
-
-enum gbms_tags {
-	GBMS_TAG_BGCE = 0x42474345,
-	GBMS_TAG_BCNT = 0x42434e54,
-	GBMS_TAG_BRES = 0x42524553,
-	GBMS_TAG_SNUM = 0x534e554d,
-	GBMS_TAG_HIST = 0x48495354,
-	GBMS_TAG_BRID = 0x42524944,
-	GBMS_TAG_DSNM = 0x44534e4d,
-	GBMS_TAG_MINF = 0x4d494e46,
-	GBMS_TAG_DINF = 0x44494e46,
-	GBMS_TAG_BGPN = 0x4247504e,
-	GBMS_TAG_CNTB = 0x434e5442,
-	GBMS_TAG_CELL = 0x43454c4c,
-};
-
-/**
- * struct gbms_storage_desc - callbacks for a GBMS storage provider.
- *
- * Fields not used should be initialized with NULL. The provider name and the
- * iter callback are optional but strongly recommended. The write, fetch, store
- * and flush callbacks are optional, descriptors with a non NULL write/store
- * callback should have a non NULL read/fetch callback.
- *
- * The iterator callback (iter) is used to list the tags stored in the provider
- * and can be used to detect duplicates. The list of tags exported from iter
- * can be expected to be static (i.e. tags can be enumerated once on
- * registration).
- *
- * The read and write callbacks transfer the data associated with a tag. The
- * calls must return -ENOENT when called with a tag that is not known to the
- * provider, a negative number on every other error or the number of bytes
- * read or written to the device. The tag lookup for the read and write
- * callbacks must be very efficient (i.e. consider implementation that use hash
- * or switch statements).
- *
- * Fetch and store callbacks are used to grant non-mediated access to a range
- * of consecutive addresses in storage space. The implementation must return a
- * negative number on error or the number of bytes transferred with the
- * operation. Support caching of the tag data location requires non NULL fetch
- * and not NULL info callbacks.
- *
- * The read_data and write_data callbacks transfer the data associated with an
- * enumerator. The calls must return -ENOENT when called with a tag that is not
- * known to the provider, a negative number on every other error or the number
- * of bytes read or written to the device during data transfers.
- *
- * Clients can only access keys that are available on a device (i.e. clients
- * cannot create new tags) and the API returns -ENOENT when trying to access a
- * tag that is not available on a device, -EGAIN while the storage is not fully
- * initialized.
- *
- * @iter: callback, return the tags known from this provider
- * @info: callback, return address and size for tags (used for caching)
- * @read: callback, read data from a tag
- * @write: callback, write data to a tag
- * @fetch: callback, read up to count data bytes from an address
- * @store: callback, write up to count data bytes to an address
- * @flush: callback, request a fush of data to permanent storage
- * @read_data: callback, read the elements of an enumerations
- * @write_data: callback, write to the elements of an enumeration
- */
-struct gbms_storage_desc {
-	int (*iter)(int index, gbms_tag_t *tag, void *ptr);
-	int (*info)(gbms_tag_t tag, size_t *addr, size_t *size, void *ptr);
-	int (*read)(gbms_tag_t tag, void *data, size_t count, void *ptr);
-	int (*write)(gbms_tag_t tag, const void *data, size_t count, void *ptr);
-	int (*fetch)(void *data, size_t addr, size_t count, void *ptr);
-	int (*store)(const void *data, size_t addr, size_t count, void *ptr);
-	int (*flush)(bool force, void *ptr);
-
-	int (*read_data)(gbms_tag_t tag, void *data, size_t count, int idx,
-			 void *ptr);
-	int (*write_data)(gbms_tag_t tag, const void *data, size_t count,
-			  int idx, void *ptr);
-};
-
-struct gbms_storage_device;
-
-#if IS_ENABLED(CONFIG_GOOGLE_BMS)
-
-extern int gbms_storage_register(struct gbms_storage_desc *desc,
-				 const char *name, void *ptr);
-extern int gbms_storage_read(gbms_tag_t tag, void *data, size_t count);
-extern int gbms_storage_write(gbms_tag_t tag, const void *data, size_t count);
-
-extern int gbms_storage_read_data(gbms_tag_t tag, void *data, size_t count,
-				  int idx);
-extern int gbms_storage_write_data(gbms_tag_t tag, const void *data,
-				   size_t count, int idx);
-extern int gbms_storage_flush(gbms_tag_t tag);
-extern int gbms_storage_flush_all(void);
-
-/* standard device implementation that read data from an enumeration */
-extern struct gbms_storage_device *gbms_storage_create_device(const char *name,
-							      gbms_tag_t tag);
-extern void gbms_storage_cleanup_device(struct gbms_storage_device *gdev);
-
-#else
-
-int gbms_storage_register(struct gbms_storage_desc *desc, const char *name,
-			  void *ptr)
-{
-	return -EINVAL;
-}
-int gbms_storage_read(gbms_tag_t tag, void *data, size_t count)
-{
-	return -EINVAL;
-}
-int gbms_storage_write(gbms_tag_t tag, const void *data, size_t count)
-{
-	return -EINVAL;
-}
-int gbms_storage_read_data(gbms_tag_t tag, void *data, size_t count, int idx)
-{
-	return -EINVAL;
-}
-int gbms_storage_write_data(gbms_tag_t tag, const void *data, size_t count,
-			    int idx)
-{
-	return -EINVAL;
-}
-int gbms_storage_flush(gbms_tag_t tag)
-{
-	return -EINVAL;
-}
-int gbms_storage_flush_all(void)
-{
-	return -EINVAL;
-}
-struct gbms_storage_device *gbms_storage_create_device(const char *name,
-						       gbms_tag_t tag)
-{
-	return NULL;
-}
-void gbms_storage_cleanup_device(struct gbms_storage_device *gdev)
-{
-	return;
-}
-
-#endif /* CONFIG_GOOGLE_BMS */
+bool gbms_temp_defend_dry_run(bool update, bool dry_run);
 
 #endif  /* __GOOGLE_BMS_H_ */

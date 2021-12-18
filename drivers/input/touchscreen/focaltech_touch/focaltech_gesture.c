@@ -446,13 +446,13 @@ void fts_gesture_recovery(struct i2c_client *client)
 		fts_i2c_write_reg(client, 0xD7, 0xff);
 		fts_i2c_write_reg(client, 0xD8, 0xff);
 		fts_gesture_reg_write(client, FTS_REG_GESTURE_DOUBLETAP_ON, true);
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 		fts_fod_reg_write(client, FTS_REG_GESTURE_DOUBLETAP_ON, true);
 #endif
 	}
 }
 
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 void fts_fod_recovery(struct i2c_client *client)
 {
 	FTS_FUNC_ENTER();
@@ -543,7 +543,7 @@ int fts_gesture_suspend(struct i2c_client *client)
 		fts_gesture_data.active = DISABLE;
 		return -EIO;
 	}
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	ret = fts_fod_reg_write(client, FTS_REG_GESTURE_DOUBLETAP_ON, true);
 	if (ret) {
 		FTS_ERROR("[GESTURE]Enter into gesture(suspend) failed!\n");
@@ -584,7 +584,7 @@ int fts_gesture_resume(struct i2c_client *client)
 		FTS_ERROR("[GESTURE]Resume from gesture failed!\n");
 		return -EIO;
 	}
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	ret = fts_fod_reg_write(client, FTS_REG_GESTURE_DOUBLETAP_ON, false);
 	if (ret) {
 		FTS_ERROR("[GESTURE]resume from gesture(suspend) failed!\n");

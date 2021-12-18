@@ -69,9 +69,6 @@ static DEFINE_SPINLOCK(time_sync_lock);
 #define FORCE_WAKE_DELAY_MAX_US			6000
 #define FORCE_WAKE_DELAY_TIMEOUT_US		60000
 
-#define POWER_ON_RETRY_MAX_TIMES		3
-#define POWER_ON_RETRY_DELAY_MS			200
-
 #define LINK_TRAINING_RETRY_MAX_TIMES		3
 #define LINK_TRAINING_RETRY_DELAY_MS		500
 
@@ -1983,7 +1980,7 @@ static int cnss_qca6174_powerup(struct cnss_pci_data *pci_priv)
 	int ret = 0;
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 
-	ret = cnss_power_on_device(plat_priv);
+	ret = cnss_power_on_device(plat_priv, false);
 	if (ret) {
 		cnss_pr_err("Failed to power on device, err = %d\n", ret);
 		goto out;
@@ -2069,7 +2066,7 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 
 	plat_priv->power_up_error = 0;
 retry:
-	ret = cnss_power_on_device(plat_priv);
+	ret = cnss_power_on_device(plat_priv, false);
 	if (ret) {
 		cnss_pr_err("Failed to power on device, err = %d\n", ret);
 		goto out;

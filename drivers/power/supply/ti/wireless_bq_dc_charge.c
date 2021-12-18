@@ -1190,7 +1190,7 @@ static int wldc_pm_fc2_charge_algo(struct wireless_dc_device_info *pm)
 	} else {
 		fc2_taper_timer = 0;
 	}
-
+		
 	/* do thermal and jeita check */
 	wl_get_batt_current_thermal_level(pm, &thermal_level);
 	pm->is_temp_out_fc2_range = wl_disable_cp_by_jeita_status(pm);
@@ -1201,6 +1201,7 @@ static int wldc_pm_fc2_charge_algo(struct wireless_dc_device_info *pm)
 			pm->is_temp_out_fc2_range, thermal_level);
 		return PM_ALGO_RET_CHG_DISABLED;
 	}
+
 
 	steps = min(sw_ctrl_steps, hw_ctrl_steps);
 	pr_info("steps: %d, sw_ctrl_steps:%d, hw_ctrl_steps:%d\n", steps, sw_ctrl_steps, hw_ctrl_steps);

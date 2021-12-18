@@ -37,7 +37,7 @@
 *****************************************************************************/
 #include "focaltech_core.h"
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_POINT_REPORT_CHECK)
 /*****************************************************************************
 * Private constant and macro definitions using #define
 *****************************************************************************/

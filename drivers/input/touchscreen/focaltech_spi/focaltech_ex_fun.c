@@ -120,11 +120,11 @@ static ssize_t fts_debug_write(
 	case PROC_SET_TEST_FLAG:
 		FTS_DEBUG("[APK]: PROC_SET_TEST_FLAG = %x", writebuf[1]);
 		if (writebuf[1] == 0) {
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 			fts_esdcheck_switch(ENABLE);
 #endif
 		} else {
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 			fts_esdcheck_switch(DISABLE);
 #endif
 		}
@@ -229,7 +229,7 @@ static ssize_t fts_debug_read(
 		readbuf = tmpbuf;
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(1);
 #endif
 
@@ -261,7 +261,7 @@ static ssize_t fts_debug_read(
 		break;
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(0);
 #endif
 
@@ -323,11 +323,11 @@ static int fts_debug_write(
 	case PROC_SET_TEST_FLAG:
 		FTS_DEBUG("[APK]: PROC_SET_TEST_FLAG = %x", writebuf[1]);
 		if (writebuf[1] == 0) {
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 			fts_esdcheck_switch(ENABLE);
 #endif
 		} else {
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 			fts_esdcheck_switch(DISABLE);
 #endif
 		}
@@ -432,7 +432,7 @@ static int fts_debug_read(
 		readbuf = tmpbuf;
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(1);
 #endif
 
@@ -464,7 +464,7 @@ static int fts_debug_read(
 		break;
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(0);
 #endif
 
@@ -496,11 +496,11 @@ static ssize_t fts_fw_version_read(struct file *filp,
 
 	mutex_lock(&ts_data->input_dev->mutex);
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(1);
 #endif
 	ret = fts_read_reg(FTS_REG_FW_VER, &fwver);
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(0);
 #endif
 	if ((ret < 0) || (fwver == 0xFF) || (fwver == 0x00))
@@ -703,11 +703,11 @@ static ssize_t fts_tpfwver_show(
 
 	mutex_lock(&input_dev->mutex);
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(1);
 #endif
 	ret = fts_read_reg(FTS_REG_FW_VER, &fwver);
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(0);
 #endif
 	if ((ret < 0) || (fwver == 0xFF) || (fwver == 0x00))
@@ -910,7 +910,7 @@ static ssize_t fts_tprwreg_store(
 		rw_op.len = fts_parse_buf(buf, cmd_length);
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(1);
 #endif
 	if (rw_op.len < 0) {
@@ -956,7 +956,7 @@ static ssize_t fts_tprwreg_store(
 		}
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(0);
 #endif
 	mutex_unlock(&input_dev->mutex);
@@ -1080,7 +1080,7 @@ static ssize_t fts_dumpreg_show(
 	struct input_dev *input_dev = fts_data->input_dev;
 
 	mutex_lock(&input_dev->mutex);
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(1);
 #endif
 	fts_read_reg(FTS_REG_POWER_MODE, &val);
@@ -1112,7 +1112,7 @@ static ssize_t fts_dumpreg_show(
 
 	fts_read_reg(FTS_REG_FLOW_WORK_CNT, &val);
 	count += snprintf(buf + count, PAGE_SIZE, "ESD count:0x%02x\n", val);
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_proc_busy(0);
 #endif
 

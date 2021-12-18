@@ -729,11 +729,11 @@ static void fts_irq_read_report(void)
 	int ret = 0;
 	struct fts_ts_data *ts_data = fts_data;
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_set_intr(1);
 #endif
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_POINT_REPORT_CHECK)
 	fts_prc_queue_work(ts_data);
 #endif
 
@@ -748,7 +748,7 @@ static void fts_irq_read_report(void)
 		mutex_unlock(&ts_data->report_mutex);
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_set_intr(0);
 #endif
 }
@@ -1716,7 +1716,7 @@ static int fts_ts_probe_entry(struct fts_ts_data *ts_data)
 		FTS_ERROR("create switch_state fail");
 	}
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_POINT_REPORT_CHECK)
 	ret = fts_point_report_check_init(ts_data);
 	if (ret) {
 		FTS_ERROR("init point report check fail");
@@ -1733,14 +1733,14 @@ static int fts_ts_probe_entry(struct fts_ts_data *ts_data)
 		FTS_ERROR("init gesture fail");
 	}
 
-#if FTS_TEST_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_TEST)
 	ret = fts_test_init(ts_data);
 	if (ret) {
 		FTS_ERROR("init production test fail");
 	}
 #endif
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	ret = fts_esdcheck_init(ts_data);
 	if (ret) {
 		FTS_ERROR("init esd check fail");
@@ -1821,7 +1821,7 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
 {
 	FTS_FUNC_ENTER();
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_POINT_REPORT_CHECK)
 	fts_point_report_check_exit(ts_data);
 #endif
 
@@ -1832,11 +1832,11 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
 
 	fts_fwupg_exit(ts_data);
 
-#if FTS_TEST_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_TEST)
 	fts_test_exit(ts_data);
 #endif
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_exit(ts_data);
 #endif
 
@@ -1904,7 +1904,7 @@ static int fts_ts_suspend(struct device *dev)
 	}
 #endif
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_suspend();
 #endif
 
@@ -1959,7 +1959,7 @@ static int fts_ts_resume(struct device *dev)
 	fts_wait_tp_to_valid();
 	fts_ex_mode_recovery(ts_data);
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 	fts_esdcheck_resume();
 #endif
 

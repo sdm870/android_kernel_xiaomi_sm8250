@@ -88,5 +88,4 @@ obj-$(CONFIG_CHARGER_CROS_USBPD)	+= cros_usbpd-charger.o
 obj-$(CONFIG_ARCH_QCOM)		+= qcom/
 obj-$(CONFIG_ARCH_QCOM)         += ti/
 obj-$(CONFIG_ARCH_QCOM)         += maxim/
-obj-$(CONFIG_BOARD_CAS)	+= cas_qcom/
 obj-y				+= google/

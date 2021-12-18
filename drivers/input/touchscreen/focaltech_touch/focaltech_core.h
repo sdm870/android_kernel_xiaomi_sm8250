@@ -69,6 +69,7 @@
 #include "focaltech_common.h"
 #include <linux/firmware.h>
 #include <linux/power_supply.h>
+#include <linux/pm_qos.h>
 
 /*****************************************************************************
 * Private constant and macro definitions using #define
@@ -153,6 +154,7 @@ struct fts_ts_data {
 	struct regulator *avdd;
 	spinlock_t irq_lock;
 	struct mutex report_mutex;
+	struct pm_qos_request pm_qos_req;
 	int irq;
 	bool suspended;
 	bool fw_loading;
@@ -210,7 +212,7 @@ struct fts_ts_data {
 	struct notifier_block bl_notif;
 	struct work_struct power_supply_work;
 	int is_usb_exist;
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	int fod_status;
 	bool finger_in_fod;
 	bool fod_finger_skip;
@@ -258,7 +260,7 @@ int fts_gesture_readdata(struct fts_ts_data *ts_data);
 int fts_gesture_suspend(struct i2c_client *i2c_client);
 int fts_gesture_resume(struct i2c_client *client);
 int fts_gesture_reg_write(struct i2c_client *client, u8 mask, bool enable);
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 int fts_fod_reg_write(struct i2c_client *client, u8 mask, bool enable);
 void fts_fod_recovery(struct i2c_client *client);
 #endif
@@ -277,7 +279,7 @@ int fts_remove_sysfs(struct i2c_client *client);
 #endif
 
 /* ESD */
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
 int fts_esdcheck_init(struct fts_ts_data *ts_data);
 int fts_esdcheck_exit(struct fts_ts_data *ts_data);
 int fts_esdcheck_switch(bool enable);
@@ -288,13 +290,13 @@ int fts_esdcheck_resume(void);
 #endif
 
 /* Production test */
-#if FTS_TEST_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST)
 int fts_test_init(struct i2c_client *client);
 int fts_test_exit(struct i2c_client *client);
 #endif
 
 /* Point Report Check*/
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
 int fts_point_report_check_init(struct fts_ts_data *ts_data);
 int fts_point_report_check_exit(struct fts_ts_data *ts_data);
 void fts_prc_queue_work(struct fts_ts_data *ts_data);

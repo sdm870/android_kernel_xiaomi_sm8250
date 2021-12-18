@@ -312,7 +312,7 @@ int fts_reset_proc(int hdelayms)
 		read_time--;
 	}
 
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	fts_fod_recovery(fts_data->client);
 #endif
 
@@ -582,7 +582,7 @@ static void fts_release_all_finger(void)
 #endif
 
 	FTS_FUNC_ENTER();
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	fts_data->finger_in_fod = false;
 	/* fts_data->overlap_area = 0; */
 	fod_overlap_aera = 0;
@@ -687,7 +687,7 @@ static int fts_input_report_b(struct fts_ts_data *data)
 }
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 static int fts_read_and_report_foddata(struct fts_ts_data *data)
 {
 	u8 buf[10] = { 0 };
@@ -829,7 +829,7 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 	u8 reg_value;
 
 #if FTS_GESTURE_EN
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	if (fts_read_and_report_foddata(data) == 0) {
 		if (irq_num == 1)
 			FTS_INFO("succuss to get fod data in irq handler");
@@ -851,7 +851,7 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 		fts_read_palm_data();
 #endif
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
 	fts_prc_queue_work(data);
 #endif
 
@@ -947,7 +947,7 @@ static irqreturn_t fts_ts_interrupt(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
 	fts_esdcheck_set_intr(1);
 #endif
 
@@ -965,7 +965,7 @@ static irqreturn_t fts_ts_interrupt(int irq, void *data)
 		fts_report_event(ts_data);
 		mutex_unlock(&ts_data->report_mutex);
 	}
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
 	fts_esdcheck_set_intr(0);
 #endif
 
@@ -1100,7 +1100,7 @@ static int fts_input_init(struct fts_ts_data *ts_data)
 #endif
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, pdata->x_min, pdata->x_max - 1, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, pdata->y_min, pdata->y_max - 1, 0, 0);
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	input_set_capability(input_dev, EV_KEY, KEY_GOTO);
 	input_set_capability(input_dev, EV_KEY, BTN_INFO);
 	input_set_abs_params(input_dev, ABS_MT_WIDTH_MAJOR, pdata->x_min, pdata->x_max - 1, 0, 0);
@@ -2166,7 +2166,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 
 	spin_lock_init(&ts_data->irq_lock);
 	mutex_init(&ts_data->report_mutex);
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	mutex_init(&ts_data->fod_mutex);
 	ts_data->fod_status = -1;
 #endif
@@ -2256,7 +2256,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 #endif
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
 	ret = fts_point_report_check_init(ts_data);
 	if (ret) {
 		FTS_ERROR("init point report check fail");
@@ -2277,7 +2277,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 #endif
 
-#if FTS_TEST_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST)
 	ret = fts_test_init(client);
 	if (ret) {
 		FTS_ERROR("init production test fail");
@@ -2285,7 +2285,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 #endif
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
 	ret = fts_esdcheck_init(ts_data);
 	if (ret) {
 		FTS_ERROR("init esd check fail");
@@ -2300,6 +2300,14 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 		goto err_debugfs_create;
 	}
 
+	/*
+	 * This *must* be done before request_threaded_irq is called.
+	 * Otherwise, if an interrupt is received before request is added,
+	 * but after the interrupt has been subscribed to, pm_qos_req
+	 * may be accessed before initialization in the interrupt handler.
+	 */
+	pm_qos_add_request(&ts_data->pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
+			PM_QOS_DEFAULT_VALUE);
 	INIT_WORK(&ts_data->resume_work, fts_resume_work);
 	INIT_WORK(&ts_data->suspend_work, fts_suspend_work);
 	INIT_WORK(&ts_data->power_supply_work, fts_power_supply_work);
@@ -2333,6 +2341,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 		FTS_ERROR("register bl_notifier failed!\n");
 	}
 #endif
+
 	ts_data->power_supply_notifier.notifier_call = fts_power_supply_event;
 	power_supply_reg_notifier(&ts_data->power_supply_notifier);
 	if (ts_data->fts_tp_class == NULL) {
@@ -2406,6 +2415,7 @@ err_power_init:
 err_gpio_config:
 	kfree_safe(ts_data->point_buf);
 	kfree_safe(ts_data->events);
+	pm_qos_remove_request(&ts_data->pm_qos_req);
 	input_unregister_device(ts_data->input_dev);
 err_input_init:
 	if (ts_data->ts_workqueue)
@@ -2434,7 +2444,7 @@ static int fts_ts_remove(struct i2c_client *client)
 
 	sysfs_remove_group(&client->dev.kobj, &fts_attr_group);
 
-#if FTS_POINT_REPORT_CHECK_EN
+#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
 	fts_point_report_check_exit(ts_data);
 #endif
 
@@ -2452,15 +2462,16 @@ static int fts_ts_remove(struct i2c_client *client)
 	fts_fwupg_exit(ts_data);
 #endif
 
-#if FTS_TEST_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST)
 	fts_test_exit(client);
 #endif
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
 	fts_esdcheck_exit(ts_data);
 #endif
 
 	backlight_unregister_notifier(&ts_data->bl_notif);
+	pm_qos_remove_request(&ts_data->pm_qos_req);
 	power_supply_unreg_notifier(&ts_data->power_supply_notifier);
 #if defined(CONFIG_DRM) && defined(DRM_ADD_COMPLETE)
 	if (mi_drm_unregister_client(&ts_data->fb_notif))
@@ -2534,13 +2545,13 @@ static int fts_ts_suspend(struct device *dev)
 	int ret = 0;
 	struct fts_ts_data *ts_data = dev_get_drvdata(dev);
 
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	mutex_lock(&ts_data->fod_mutex);
 #endif
 	FTS_FUNC_ENTER();
 	if (ts_data->suspended) {
 		FTS_INFO("Already in suspend state");
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 		mutex_unlock(&ts_data->fod_mutex);
 #endif
 		return 0;
@@ -2548,7 +2559,7 @@ static int fts_ts_suspend(struct device *dev)
 
 	if (ts_data->fw_loading) {
 		FTS_INFO("fw upgrade in process, can't suspend");
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 		mutex_unlock(&ts_data->fod_mutex);
 #endif
 		return 0;
@@ -2564,7 +2575,7 @@ static int fts_ts_suspend(struct device *dev)
 	}
 #endif
 */
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
 	fts_esdcheck_suspend();
 #endif
 	fts_irq_disable_sync();
@@ -2587,7 +2598,7 @@ static int fts_ts_suspend(struct device *dev)
 		goto release_finger;
 	}
 #endif
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 /* fod status = -1 as default value, means fingerprint is not enabled*
  * fod_status = 100 as all fingers in the system is deleted
  * aod_status != 0 means single tap in aod is supported
@@ -2644,7 +2655,7 @@ release_finger:
 	mutex_lock(&fts_data->report_mutex);
 	fts_release_all_finger();
 	mutex_unlock(&fts_data->report_mutex);
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	mutex_unlock(&ts_data->fod_mutex);
 #endif
 	FTS_FUNC_EXIT();
@@ -2679,7 +2690,7 @@ static int fts_ts_resume(struct device *dev)
 
 
 #ifndef CONFIG_FACTORY_BUILD
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	FTS_INFO("%s finger_in_fod:%d fod_finger_skip:%d\n", __func__, ts_data->finger_in_fod, ts_data->fod_finger_skip);
 	if (ts_data->pdata->reset_when_resume && !ts_data->finger_in_fod && !ts_data->fod_finger_skip) {
 		FTS_ERROR("fod-----reset when resume");
@@ -2709,7 +2720,7 @@ static int fts_ts_resume(struct device *dev)
 	}
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	if (fts_data->finger_in_fod) {
 		fts_fod_reg_write(ts_data->client, FTS_REG_GESTURE_FOD_NO_CAL, true);
 	}
@@ -2717,7 +2728,7 @@ static int fts_ts_resume(struct device *dev)
 
 	fts_tp_state_recovery(ts_data->client);
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
 	fts_esdcheck_resume();
 #endif
 
@@ -2734,7 +2745,7 @@ static int fts_ts_resume(struct device *dev)
 	}
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_FTS_FOD
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	fts_gesture_reg_write(ts_data->client, FTS_REG_GESTURE_DOUBLETAP_ON, false);
 #endif
 	ts_data->suspended = false;
@@ -2756,14 +2767,14 @@ static int fts_pm_suspend(struct device *dev)
 	int ret = 0;
 	ts_data->dev_pm_suspend = true;
 
-#ifndef CONFIG_TOUCHSCREEN_FTS_FOD
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	if (ts_data->lpwg_mode) {
 #endif
 		ret = enable_irq_wake(ts_data->irq);
 		if (ret) {
 			FTS_INFO("enable_irq_wake(irq:%d) failed", ts_data->irq);
 		}
-#ifndef CONFIG_TOUCHSCREEN_FTS_FOD
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	}
 #endif
 	reinit_completion(&ts_data->dev_pm_suspend_completion);
@@ -2777,14 +2788,14 @@ static int fts_pm_resume(struct device *dev)
 
 	ts_data->dev_pm_suspend = false;
 
-#ifndef CONFIG_TOUCHSCREEN_FTS_FOD
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	if (ts_data->lpwg_mode) {
 #endif
 		ret = disable_irq_wake(ts_data->irq);
 		if (ret) {
 			FTS_INFO("disable_irq_wake(irq:%d) failed", ts_data->irq);
 		}
-#ifndef CONFIG_TOUCHSCREEN_FTS_FOD
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
 	}
 #endif
 	complete(&ts_data->dev_pm_suspend_completion);

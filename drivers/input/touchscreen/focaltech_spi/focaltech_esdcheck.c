@@ -40,7 +40,7 @@
 *****************************************************************************/
 #include "focaltech_core.h"
 
-#if FTS_ESDCHECK_EN
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_FOCALTECH_ESDCHECK)
 /*****************************************************************************
 * Private constant and macro definitions using #define
 *****************************************************************************/

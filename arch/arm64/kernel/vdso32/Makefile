@@ -105,24 +105,6 @@ VDSO_CFLAGS += -Wno-int-to-pointer-cast
 VDSO_AFLAGS := $(VDSO_CAFLAGS)
 VDSO_AFLAGS += -D__ASSEMBLY__
 
-# Makefile doesn't provide any way to check for 32-bit compiler version and we want to mess with it
-# as minimum as possible.
-ifeq ($(cc-name),clang)
-# big.LITTLE / DynamIQ optimizations are not supported
-MACH32_CFLAGS := $(call cc32-option, -mcpu=cortex-a55, -mcpu=cortex-a53)
-MACH32_CFLAGS += $(call cc32-option, -mtune=cortex-a55, -mtune=cortex-a53)
-else
-MACH32_CFLAGS := $(call cc32-option, -mcpu=cortex-a77.cortex-a55, \
-		  $(call cc32-option, -mcpu=cortex-a76.cortex-a53, -mcpu=cortex-a53))
-MACH32_CFLAGS += $(call cc32-option, -mtune=cortex-a77.cortex-a55, \
-		  $(call cc32-option, -mtune=cortex-a76.cortex-a53, -mtune=cortex-a53))
-endif
-# Assembler doesn't like big.LITTLE / DynamIQ setup so we optimize assembly codes for LITTLE CPU
-MACH32_AFLAGS := -Wa,$(strip $(call cc32-option, -mcpu=cortex-a55, -mcpu=cortex-a53))
-# Append result to VDSO_CFLAGS and VDSO_AFLAGS
-VDSO_CFLAGS += $(strip $(MACH32_CFLAGS) $(MACH32_AFLAGS))
-VDSO_AFLAGS += $(strip $(MACH32_AFLAGS))
-
 # Check for binutils support for dmb ishld
 dmbinstr := $(call cc32-as-instr,dmb ishld,-DCONFIG_AS_DMB_ISHLD=1)
 
