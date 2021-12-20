@@ -4702,6 +4702,9 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 		return rc;
 	}
 
+	if ((usb_current > 0 && usb_current < USBIN_500MA) || (usb_current == USBIN_900MA))
+    		usb_current = USBIN_500MA;
+
 	if (chg->real_charger_type == POWER_SUPPLY_TYPE_USB_FLOAT) {
 		if (usb_current == -ETIMEDOUT) {
 			if ((chg->float_cfg & FLOAT_OPTIONS_MASK)

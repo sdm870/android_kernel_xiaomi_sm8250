@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -25,6 +25,9 @@
 #include "wcd-mbhc-legacy.h"
 #include "wcd-mbhc-adc.h"
 #include <asoc/wcd-mbhc-v2-api.h>
+
+struct mutex hphl_pa_lock;
+struct mutex hphr_pa_lock;
 
 void wcd_mbhc_jack_report(struct wcd_mbhc *mbhc,
 			  struct snd_soc_jack *jack, int status, int mask)
@@ -309,9 +312,9 @@ out_micb_en:
 			mbhc->mbhc_cb->set_cap_mode(component, micbias1, false);
 		break;
 	case WCD_EVENT_PRE_HPHL_PA_OFF:
-		mutex_lock(&mbhc->hphl_pa_lock);
 		break;
 	case WCD_EVENT_POST_HPHL_PA_OFF:
+		mutex_lock(&hphl_pa_lock);
 		clear_bit(WCD_MBHC_HPHL_PA_OFF_ACK, &mbhc->hph_pa_dac_state);
 		if (mbhc->hph_status & SND_JACK_OC_HPHL)
 			hphlocp_off_report(mbhc, SND_JACK_OC_HPHL);
@@ -323,13 +326,13 @@ out_micb_en:
 		else
 			/* Disable micbias, pullup & enable cs */
 			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_CS);
-		mutex_unlock(&mbhc->hphl_pa_lock);
+		mutex_unlock(&hphl_pa_lock);
 		clear_bit(WCD_MBHC_ANC0_OFF_ACK, &mbhc->hph_anc_state);
 		break;
 	case WCD_EVENT_PRE_HPHR_PA_OFF:
-		mutex_lock(&mbhc->hphr_pa_lock);
 		break;
 	case WCD_EVENT_POST_HPHR_PA_OFF:
+		mutex_lock(&hphr_pa_lock);
 		clear_bit(WCD_MBHC_HPHR_PA_OFF_ACK, &mbhc->hph_pa_dac_state);
 		if (mbhc->hph_status & SND_JACK_OC_HPHR)
 			hphrocp_off_report(mbhc, SND_JACK_OC_HPHR);
@@ -341,7 +344,7 @@ out_micb_en:
 		else
 			/* Disable micbias, pullup & enable cs */
 			wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_CS);
-		mutex_unlock(&mbhc->hphr_pa_lock);
+		mutex_unlock(&hphr_pa_lock);
 		clear_bit(WCD_MBHC_ANC1_OFF_ACK, &mbhc->hph_anc_state);
 		break;
 	case WCD_EVENT_PRE_HPHL_PA_ON:
@@ -412,22 +415,22 @@ static void wcd_mbhc_clr_and_turnon_hph_padac(struct wcd_mbhc *mbhc)
 	WCD_MBHC_REG_READ(WCD_MBHC_HPH_CNP_WG_TIME, wg_time);
 	wg_time += 1;
 
-	mutex_lock(&mbhc->hphr_pa_lock);
+	mutex_lock(&hphr_pa_lock);
 	if (test_and_clear_bit(WCD_MBHC_HPHR_PA_OFF_ACK,
 			       &mbhc->hph_pa_dac_state)) {
 		pr_debug("%s: HPHR clear flag and enable PA\n", __func__);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_HPHR_PA_EN, 1);
 		pa_turned_on = true;
 	}
-	mutex_unlock(&mbhc->hphr_pa_lock);
-	mutex_lock(&mbhc->hphl_pa_lock);
+	mutex_unlock(&hphr_pa_lock);
+	mutex_lock(&hphl_pa_lock);
 	if (test_and_clear_bit(WCD_MBHC_HPHL_PA_OFF_ACK,
 			       &mbhc->hph_pa_dac_state)) {
 		pr_debug("%s: HPHL clear flag and enable PA\n", __func__);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_HPHL_PA_EN, 1);
 		pa_turned_on = true;
 	}
-	mutex_unlock(&mbhc->hphl_pa_lock);
+	mutex_unlock(&hphl_pa_lock);
 
 	if (pa_turned_on) {
 		pr_debug("%s: PA was turned on by MBHC and not by DAPM\n",
@@ -1026,7 +1029,8 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 		mbhc->extn_cable_hph_rem = false;
 		wcd_mbhc_report_plug(mbhc, 0, jack_type);
 
-		if (mbhc->mbhc_cfg->enable_usbc_analog) {
+		if (mbhc->mbhc_cfg->enable_usbc_workaround ||
+			mbhc->mbhc_cfg->enable_usbc_analog) {
 			WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_L_DET_EN, 0);
 			if (mbhc->mbhc_cb->clk_setup)
 				mbhc->mbhc_cb->clk_setup(
@@ -1391,7 +1395,8 @@ static int wcd_mbhc_initialise(struct wcd_mbhc *mbhc)
 	 * Also, disable hph_l pull-up current source as HS_DET_L is driven
 	 * by an external source
 	 */
-	if (mbhc->mbhc_cfg->enable_usbc_analog) {
+	if (mbhc->mbhc_cfg->enable_usbc_workaround ||
+		mbhc->mbhc_cfg->enable_usbc_analog) {
 		if (mbhc->mbhc_cb->hph_pull_up_control_v2)
 			mbhc->mbhc_cb->hph_pull_up_control_v2(component,
 							      HS_PULLUP_I_OFF);
@@ -1414,7 +1419,8 @@ static int wcd_mbhc_initialise(struct wcd_mbhc *mbhc)
 	 * when a non-audio accessory is inserted. L_DET_EN sets to 1 when FSA
 	 * I2C driver notifies that ANALOG_AUDIO_ADAPTER is inserted
 	 */
-	if (mbhc->mbhc_cfg->enable_usbc_analog)
+	if (mbhc->mbhc_cfg->enable_usbc_workaround ||
+		mbhc->mbhc_cfg->enable_usbc_analog)
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_L_DET_EN, 0);
 	else
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_L_DET_EN, 1);
@@ -1434,7 +1440,8 @@ static int wcd_mbhc_initialise(struct wcd_mbhc *mbhc)
 	mbhc->mbhc_cb->mbhc_bias(component, true);
 	/* enable MBHC clock */
 	if (mbhc->mbhc_cb->clk_setup) {
-		if (mbhc->mbhc_cfg->enable_usbc_analog)
+		if (mbhc->mbhc_cfg->enable_usbc_workaround ||
+			mbhc->mbhc_cfg->enable_usbc_analog)
 			mbhc->mbhc_cb->clk_setup(component, false);
 		else
 			mbhc->mbhc_cb->clk_setup(component, true);
@@ -1614,6 +1621,7 @@ int wcd_mbhc_start(struct wcd_mbhc *mbhc, struct wcd_mbhc_config *mbhc_cfg)
 	struct snd_soc_component *component;
 	struct snd_soc_card *card;
 	const char *usb_c_dt = "qcom,msm-mbhc-usbc-audio-supported";
+	const char *usb_workaround_dt = "qcom,msm-mbhc-usbc-workaround";
 
 	if (!mbhc || !mbhc_cfg)
 		return -EINVAL;
@@ -1636,6 +1644,20 @@ int wcd_mbhc_start(struct wcd_mbhc *mbhc, struct wcd_mbhc_config *mbhc_cfg)
 		dev_dbg(card->dev,
 				"%s: %s in dt node is missing or false\n",
 				__func__, usb_c_dt);
+		dev_dbg(card->dev,
+			"%s: skipping USB c analog configuration\n", __func__);
+	}
+
+	/* check if USB C analog workaround is defined on device tree */
+	mbhc_cfg->enable_usbc_workaround = 0;
+	if (of_find_property(card->dev->of_node, usb_c_dt, NULL)) {
+		rc = of_property_read_u32(card->dev->of_node, usb_workaround_dt,
+				&mbhc_cfg->enable_usbc_workaround);
+	}
+	if (mbhc_cfg->enable_usbc_workaround == 0 || rc != 0) {
+		dev_dbg(card->dev,
+				"%s: %s in dt node is missing or false\n",
+				__func__, usb_workaround_dt);
 		dev_dbg(card->dev,
 			"%s: skipping USB c analog configuration\n", __func__);
 	}
@@ -1868,8 +1890,6 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_component *component,
 				  wcd_mbhc_fw_read);
 		INIT_DELAYED_WORK(&mbhc->mbhc_btn_dwork, wcd_btn_lpress_fn);
 	}
-	mutex_init(&mbhc->hphl_pa_lock);
-	mutex_init(&mbhc->hphr_pa_lock);
 	init_completion(&mbhc->btn_press_compl);
 
 	/* Register event notifier */
@@ -2040,18 +2060,20 @@ void wcd_mbhc_deinit(struct wcd_mbhc *mbhc)
 		WCD_MBHC_RSC_UNLOCK(mbhc);
 	}
 	mutex_destroy(&mbhc->codec_resource_lock);
-	mutex_destroy(&mbhc->hphl_pa_lock);
-	mutex_destroy(&mbhc->hphr_pa_lock);
 }
 EXPORT_SYMBOL(wcd_mbhc_deinit);
 
 static int __init mbhc_init(void)
 {
+	mutex_init(&hphl_pa_lock);
+	mutex_init(&hphr_pa_lock);
 	return 0;
 }
 
 static void __exit mbhc_exit(void)
 {
+	mutex_destroy(&hphl_pa_lock);
+	mutex_destroy(&hphr_pa_lock);
 }
 
 module_init(mbhc_init);

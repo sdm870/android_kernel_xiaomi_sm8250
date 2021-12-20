@@ -1585,7 +1585,8 @@ static int wcd937x_get_logical_addr(struct swr_device *swr_dev)
 static bool get_usbc_hs_status(struct snd_soc_component *component,
 			struct wcd_mbhc_config *mbhc_cfg)
 {
-	if (mbhc_cfg->enable_usbc_analog) {
+	if (mbhc->mbhc_cfg->usb_workaround_dt ||
+		mbhc_cfg->enable_usbc_analog) {
 		if (!(snd_soc_component_read32(component, WCD937X_ANA_MBHC_MECH)
 			& 0x20))
 			return true;

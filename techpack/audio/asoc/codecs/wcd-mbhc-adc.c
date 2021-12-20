@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -478,7 +478,8 @@ static bool wcd_mbhc_adc_check_for_spl_headset(struct wcd_mbhc *mbhc,
 	adc_hph_threshold = wcd_mbhc_adc_get_hph_thres(mbhc);
 
 	if (output_mv > adc_threshold || output_mv < adc_hph_threshold) {
-		spl_hs = false;
+		if (mbhc->force_linein == true)
+			spl_hs = false;
 	} else {
 		spl_hs = true;
 		if (spl_hs_cnt)
@@ -540,9 +541,12 @@ static bool wcd_is_special_headset(struct wcd_mbhc *mbhc)
 		msleep(50);
 		output_mv = wcd_measure_adc_once(mbhc, MUX_CTL_IN2P);
 		if (output_mv <= adc_threshold) {
-			pr_debug("%s: Special headset detected in %d msecs\n",
-					__func__, delay);
-			is_spl_hs = true;
+			if (mbhc->force_linein != true) {
+				pr_debug(
+				"%s: Special headset detected in %d msecs\n",
+					 __func__, delay);
+				is_spl_hs = true;
+			}
 		}
 
 		if (delay == SPECIAL_HS_DETECT_TIME_MS) {
@@ -860,7 +864,7 @@ correct_plug_type:
 			plug_type = MBHC_PLUG_TYPE_HEADSET;
 		}
 
-		if (output_mv > hs_threshold) {
+		if (output_mv > hs_threshold || mbhc->force_linein == true) {
 			pr_info("%s: cable is extension cable\n", __func__);
 			plug_type = MBHC_PLUG_TYPE_HIGH_HPH;
 			wrk_complete = true;
@@ -901,11 +905,6 @@ correct_plug_type:
 			wrk_complete = false;
 		}
 	}
-	if ((plug_type == MBHC_PLUG_TYPE_HEADSET ||
-	    plug_type == MBHC_PLUG_TYPE_HEADPHONE))
-		if (mbhc->mbhc_cb->bcs_enable)
-			mbhc->mbhc_cb->bcs_enable(mbhc, true);
-
 	if (!wrk_complete) {
 		/*
 		 * If plug_tye is headset, we might have already reported either
@@ -914,8 +913,10 @@ correct_plug_type:
 		 */
 		if ((plug_type == MBHC_PLUG_TYPE_HEADSET) ||
 		    (plug_type == MBHC_PLUG_TYPE_ANC_HEADPHONE)) {
-			pr_debug("%s: plug_type:0x%x already reported\n",
-				 __func__, mbhc->current_plug);
+			pr_debug("%s: plug_type:0x%x current_plug: 0x%x already reported\n",
+				 __func__, plug_type, mbhc->current_plug);
+			if (mbhc->current_plug != plug_type)
+				goto report;
 			WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_ADC_MODE, 0);
 			WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_ADC_EN, 0);
 			goto enable_supply;
@@ -936,6 +937,11 @@ report:
 		pr_debug("%s: Switch level is low\n", __func__);
 		goto exit;
 	}
+
+	if ((plug_type == MBHC_PLUG_TYPE_HEADSET ||
+	    plug_type == MBHC_PLUG_TYPE_HEADPHONE))
+		if (mbhc->mbhc_cb->bcs_enable)
+			mbhc->mbhc_cb->bcs_enable(mbhc, true);
 
 	pr_debug("%s: Valid plug found, plug type %d wrk_cmpt %d btn_intr %d\n",
 			__func__, plug_type, wrk_complete,

@@ -1376,7 +1376,7 @@ again:
 				}
 				if (pte_young(ptent) &&
 				    likely(!(vma->vm_flags & VM_SEQ_READ)))
-					mark_page_accessed(page);
+					SetPageReferenced(page);
 			}
 			rss[mm_counter(page)]--;
 			page_remove_rmap(page, false);

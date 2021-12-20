@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
  */
 #ifndef __WCD_MBHC_V2_H__
 #define __WCD_MBHC_V2_H__
@@ -431,6 +431,7 @@ struct wcd_mbhc_config {
 	int anc_micbias;
 	bool enable_anc_mic_detect;
 	u32 enable_usbc_analog;
+	u32 enable_usbc_workaround;
 	bool moisture_duty_cycle_en;
 };
 
@@ -603,8 +604,6 @@ struct wcd_mbhc {
 	struct wcd_mbhc_register *wcd_mbhc_regs;
 
 	struct completion btn_press_compl;
-	struct mutex hphl_pa_lock;
-	struct mutex hphr_pa_lock;
 	bool deinit_in_progress;
 
 	/* Holds mbhc detection method - ADC/Legacy */
