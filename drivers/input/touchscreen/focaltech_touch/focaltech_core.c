@@ -41,7 +41,7 @@
 #include <linux/earlysuspend.h>
 #define FTS_SUSPEND_LEVEL 1	/* Early-suspend level */
 #endif
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 #include "../xiaomi/xiaomi_touch.h"
 #endif
 #include <linux/backlight.h>
@@ -95,7 +95,7 @@ extern int fts_charger_mode_set(struct i2c_client *client, bool on);
 /*****************************************************************************
 * Static function prototypes
 *****************************************************************************/
-#ifndef CONFIG_FACTORY_BUILD
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 static int fts_ts_clear_buffer(void);
 #endif
 static void fts_release_all_finger(void);
@@ -103,8 +103,10 @@ static int fts_ts_suspend(struct device *dev);
 static int fts_ts_resume(struct device *dev);
 static void fts_resume_work(struct work_struct *work);
 static void fts_suspend_work(struct work_struct *work);
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 static int fts_read_and_report_foddata(struct fts_ts_data *data);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#endif
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 static int fts_read_palm_data(void);
 static int fts_palm_enable(struct fts_ts_data *fts_data, int on);
 #endif
@@ -312,7 +314,7 @@ int fts_reset_proc(int hdelayms)
 		read_time--;
 	}
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	fts_fod_recovery(fts_data->client);
 #endif
 
@@ -582,7 +584,7 @@ static void fts_release_all_finger(void)
 #endif
 
 	FTS_FUNC_ENTER();
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	fts_data->finger_in_fod = false;
 	/* fts_data->overlap_area = 0; */
 	fod_overlap_aera = 0;
@@ -630,8 +632,10 @@ static int fts_input_report_b(struct fts_ts_data *data)
 			if (events[i].area <= 0) {
 				events[i].area = 0x09;
 			}
+		#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 			if (!data->fod_finger_skip && fod_overlap_aera == 100)
 				input_report_key(data->input_dev, BTN_INFO, 1);
+		#endif
 			input_report_abs(data->input_dev, ABS_MT_POSITION_X, events[i].x);
 			input_report_abs(data->input_dev, ABS_MT_POSITION_Y, events[i].y);
 			/* input_report_abs(data->input_dev, ABS_MT_WIDTH_MAJOR, data->overlap_area);
@@ -643,6 +647,7 @@ static int fts_input_report_b(struct fts_ts_data *data)
 
 			touchs |= BIT(events[i].id);
 			data->touchs |= BIT(events[i].id);
+		#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 			if (data->point_id_changed && data->old_point_id != 0xff
 				&& data->fod_status == 0 && data->old_point_id != events[i].id) {
 				FTS_INFO("%s FOD finger ID is Changed, release old id\n", __func__);
@@ -652,6 +657,7 @@ static int fts_input_report_b(struct fts_ts_data *data)
 				data->old_point_id = 0xff;
 				data->point_id_changed = false;
 			}
+		#endif
 		} else {
 			uppoint++;
 			input_mt_report_slot_state(data->input_dev,
@@ -687,7 +693,7 @@ static int fts_input_report_b(struct fts_ts_data *data)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 static int fts_read_and_report_foddata(struct fts_ts_data *data)
 {
 	u8 buf[10] = { 0 };
@@ -826,10 +832,10 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 	int max_touch_num = data->pdata->max_touch_number;
 	u8 *buf = data->point_buf;
 	struct i2c_client *client = data->client;
-	u8 reg_value;
 
 #if FTS_GESTURE_EN
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
+	u8 reg_value;
 	if (fts_read_and_report_foddata(data) == 0) {
 		if (irq_num == 1)
 			FTS_INFO("succuss to get fod data in irq handler");
@@ -846,12 +852,12 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 	}
 #endif
 #endif
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 	if (data->palm_sensor_switch)
 		fts_read_palm_data();
 #endif
 
-#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
+#if (IS_ENABLED(FTS_POINT_REPORT_CHECK_EN))
 	fts_prc_queue_work(data);
 #endif
 
@@ -947,7 +953,7 @@ static irqreturn_t fts_ts_interrupt(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_set_intr(1);
 #endif
 
@@ -965,7 +971,7 @@ static irqreturn_t fts_ts_interrupt(int irq, void *data)
 		fts_report_event(ts_data);
 		mutex_unlock(&ts_data->report_mutex);
 	}
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_set_intr(0);
 #endif
 
@@ -1100,7 +1106,7 @@ static int fts_input_init(struct fts_ts_data *ts_data)
 #endif
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, pdata->x_min, pdata->x_max - 1, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, pdata->y_min, pdata->y_max - 1, 0, 0);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	input_set_capability(input_dev, EV_KEY, KEY_GOTO);
 	input_set_capability(input_dev, EV_KEY, BTN_INFO);
 	input_set_abs_params(input_dev, ABS_MT_WIDTH_MAJOR, pdata->x_min, pdata->x_max - 1, 0, 0);
@@ -1196,9 +1202,9 @@ err_irq_gpio_req:
 	return ret;
 }
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 static struct xiaomi_touch_interface xiaomi_touch_interfaces;
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 static int fts_read_palm_data(void)
 {
 	int ret;
@@ -1262,7 +1268,7 @@ static int fts_palm_sensor_write(int value)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 static void fts_init_touchmode_data(void)
 {
 	int i;
@@ -1434,10 +1440,14 @@ static int fts_set_cur_value(int mode, int value)
 {
 
 	FTS_INFO("%s, mode:%d, value:%d\n", __func__, mode, value);
+
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	if (mode == Touch_Fod_Enable && fts_data && value >= 0) {
 		fts_data->fod_status = value;
 		return 0;
 	}
+#endif
+
 	if (mode == Touch_Aod_Enable && fts_data && value >= 0) {
 		fts_data->aod_status = value;
 		return 0;
@@ -1655,7 +1665,7 @@ static ssize_t fts_lockdown_info_show(struct device *dev, struct device_attribut
 			(int)ts_data->lockdown_info[7]);
 }
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 static ssize_t fts_gamemode_test_show(struct device *dev,
 					struct device_attribute *attr, char *buf)
 {
@@ -1685,13 +1695,13 @@ static ssize_t fts_gamemode_test_store(struct device *dev,
 #endif
 
 static DEVICE_ATTR(lockdown_info, 0644, fts_lockdown_info_show, NULL);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 static DEVICE_ATTR(gamemode_test, 0644, fts_gamemode_test_show, fts_gamemode_test_store);
 #endif
 
 static struct attribute *fts_attrs[] = {
 	&dev_attr_lockdown_info.attr,
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 	&dev_attr_gamemode_test.attr,
 #endif
 	NULL
@@ -1791,6 +1801,7 @@ static const struct file_operations fts_fw_version_ops = {
 	.read = fts_fw_version_read,
 };
 
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_DEBUG))
 static void tpdbg_suspend(struct fts_ts_data *ts_data, bool enable)
 {
 	if (enable)
@@ -1876,7 +1887,7 @@ static const struct file_operations tpdbg_operations = {
 	.write = tpdbg_write,
 	.release = tpdbg_release,
 };
-
+#endif
 static void fts_power_supply_work(struct work_struct *work)
 {
 	struct fts_ts_data *ts_data = container_of(work, struct fts_ts_data, power_supply_work);
@@ -1906,34 +1917,6 @@ static int fts_power_supply_event(struct notifier_block *nb, unsigned long event
 	return 0;
 }
 
-#if 0
-static int fts_bl_state_chg_callback(struct notifier_block *nb,
-					unsigned long val, void *data)
-{
-	struct fts_ts_data *ts_data = container_of(nb, struct fts_ts_data, bl_notif);
-	unsigned int blank;
-
-	if (val != BACKLIGHT_UPDATED)
-		return NOTIFY_OK;
-	if (data && ts_data) {
-		blank = *(int *)(data);
-		FTS_INFO("%s: val:%lu,blank:%u\n", __func__, val, blank);
-		if (!ts_data->suspended && blank == BACKLIGHT_OFF) {
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
-			if (ts_data->palm_sensor_switch) {
-				FTS_ERROR("%seardet enabled, skip disable irq\n", __func__);
-				return NOTIFY_OK;
-			}
-#endif
-			fts_irq_disable_sync();
-		} else {
-			fts_irq_enable();
-		}
-	}
-	return NOTIFY_OK;
-}
-#endif
-
 #if defined(CONFIG_DRM) && defined(DRM_ADD_COMPLETE)
 /*****************************************************************************
 *  Name: fb_notifier_callback
@@ -1960,6 +1943,7 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 			queue_work(fts_data->event_wq, &fts_data->resume_work);
 		} else if (*blank == MI_DRM_BLANK_POWERDOWN || *blank == MI_DRM_BLANK_LP1 || *blank == MI_DRM_BLANK_LP2) {
 			FTS_INFO("FTS do suspend work by event %s\n", *blank == MI_DRM_BLANK_POWERDOWN ? "POWER DOWN" : "LP");
+		#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 			if (*blank == MI_DRM_BLANK_POWERDOWN && fts_data->finger_in_fod) {
 				FTS_INFO("fb_notifier_callback:fod_status = %d\n", fts_data->fod_status);
 				if(fts_data->fod_status != -1 && fts_data->fod_status != 100){
@@ -1967,6 +1951,7 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 					fts_data->fod_finger_skip = true;
 				}
 			}
+		#endif
 			queue_work(fts_data->event_wq, &fts_data->suspend_work);
 		}
 	}
@@ -2041,7 +2026,7 @@ static int check_is_focal_touch(struct fts_ts_data *ts_data)
 	return true;
 }
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 static u8 fts_panel_vendor_read(void)
 {
 	if (fts_data)
@@ -2156,7 +2141,9 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	ts_data->client = client;
 	ts_data->pdata = pdata;
 	ts_data->old_point_id = 0xff;
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	ts_data->point_id_changed = false;
+#endif
 	i2c_set_clientdata(client, ts_data);
 
 	ts_data->ts_workqueue = create_singlethread_workqueue("fts_wq");
@@ -2166,7 +2153,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 
 	spin_lock_init(&ts_data->irq_lock);
 	mutex_init(&ts_data->report_mutex);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	mutex_init(&ts_data->fod_mutex);
 	ts_data->fod_status = -1;
 #endif
@@ -2235,20 +2222,20 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 		FTS_ERROR("create tp_debug fail");
 		goto err_sysfs_create_group;
 	}
+
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_DEBUG))
 	tp_debugfs = debugfs_create_file("switch_state", 0660, ts_data->debugfs, ts_data, &tpdbg_operations);
 	if (!tp_debugfs) {
 		FTS_ERROR("create debugfs fail");
 		goto err_sysfs_create_group;
 	}
-#if FTS_APK_NODE_EN
+
 	ret = fts_create_apk_debug_channel(ts_data);
 	if (ret) {
 		FTS_ERROR("create apk debug node fail");
 		goto err_debugfs_create;
 	}
-#endif
 
-#if FTS_SYSFS_NODE_EN
 	ret = fts_create_sysfs(client);
 	if (ret) {
 		FTS_ERROR("create sysfs node fail");
@@ -2256,7 +2243,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 #endif
 
-#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
+#if (IS_ENABLED(FTS_POINT_REPORT_CHECK_EN))
 	ret = fts_point_report_check_init(ts_data);
 	if (ret) {
 		FTS_ERROR("init point report check fail");
@@ -2277,7 +2264,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST))
 	ret = fts_test_init(client);
 	if (ret) {
 		FTS_ERROR("init production test fail");
@@ -2285,7 +2272,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	ret = fts_esdcheck_init(ts_data);
 	if (ret) {
 		FTS_ERROR("init esd check fail");
@@ -2335,17 +2322,10 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	register_early_suspend(&ts_data->early_suspend);
 #endif
 
-#if 0
-	ts_data->bl_notif.notifier_call = fts_bl_state_chg_callback;
-	if (backlight_register_notifier(&ts_data->bl_notif) < 0) {
-		FTS_ERROR("register bl_notifier failed!\n");
-	}
-#endif
-
 	ts_data->power_supply_notifier.notifier_call = fts_power_supply_event;
 	power_supply_reg_notifier(&ts_data->power_supply_notifier);
 	if (ts_data->fts_tp_class == NULL) {
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 		ts_data->fts_tp_class = get_xiaomi_touch_class();
 #else
 		ts_data->fts_tp_class = class_create(THIS_MODULE, "touch");
@@ -2361,7 +2341,7 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 				FTS_ERROR("Failed to create fod_test sysfs group!\n");
 				goto err_class_create;
 			}
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 			memset(&xiaomi_touch_interfaces, 0x00, sizeof(struct xiaomi_touch_interface));
 			xiaomi_touch_interfaces.touch_vendor_read = fts_get_touch_vendor;
 			xiaomi_touch_interfaces.panel_vendor_read = fts_panel_vendor_read;
@@ -2444,15 +2424,15 @@ static int fts_ts_remove(struct i2c_client *client)
 
 	sysfs_remove_group(&client->dev.kobj, &fts_attr_group);
 
-#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
+#if (IS_ENABLED(FTS_POINT_REPORT_CHECK_EN))
 	fts_point_report_check_exit(ts_data);
 #endif
 
-#if FTS_APK_NODE_EN
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_DEBUG))
 	fts_release_apk_debug_channel(ts_data);
 #endif
 
-#if FTS_SYSFS_NODE_EN
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_DEBUG))
 	fts_remove_sysfs(client);
 #endif
 	destroy_workqueue(ts_data->event_wq);
@@ -2462,11 +2442,11 @@ static int fts_ts_remove(struct i2c_client *client)
 	fts_fwupg_exit(ts_data);
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST))
 	fts_test_exit(client);
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_exit(ts_data);
 #endif
 
@@ -2508,7 +2488,8 @@ static int fts_ts_remove(struct i2c_client *client)
 	FTS_FUNC_EXIT();
 	return 0;
 }
-#ifndef CONFIG_FACTORY_BUILD
+
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 /*****************************************************************************
 * Name: fts_ts_clear_buffer
 * Brief: during irq disabled, FTS_REG_INT_ACK(0x3E) register will store three frames
@@ -2545,13 +2526,13 @@ static int fts_ts_suspend(struct device *dev)
 	int ret = 0;
 	struct fts_ts_data *ts_data = dev_get_drvdata(dev);
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	mutex_lock(&ts_data->fod_mutex);
 #endif
 	FTS_FUNC_ENTER();
 	if (ts_data->suspended) {
 		FTS_INFO("Already in suspend state");
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 		mutex_unlock(&ts_data->fod_mutex);
 #endif
 		return 0;
@@ -2559,14 +2540,14 @@ static int fts_ts_suspend(struct device *dev)
 
 	if (ts_data->fw_loading) {
 		FTS_INFO("fw upgrade in process, can't suspend");
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 		mutex_unlock(&ts_data->fod_mutex);
 #endif
 		return 0;
 	}
 
 /*
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 	if (ts_data->palm_sensor_switch) {
 		update_palm_sensor_value(0);
 		fts_palm_enable(ts_data, 1);
@@ -2575,7 +2556,7 @@ static int fts_ts_suspend(struct device *dev)
 	}
 #endif
 */
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_suspend();
 #endif
 	fts_irq_disable_sync();
@@ -2584,12 +2565,16 @@ static int fts_ts_suspend(struct device *dev)
 #ifndef CONFIG_FACTORY_BUILD
 #if FTS_GESTURE_EN
 	if (fts_gesture_suspend(ts_data->client) == 0) {
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 		if(ts_data->fod_status == -1 || ts_data->fod_status == 100){
 			fts_fod_reg_write(ts_data->client, FTS_REG_GESTURE_FOD_ON, false);
 		}
+#endif
 		ts_data->suspended = true;
 		ts_data->old_point_id = 0xff;
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 		ts_data->point_id_changed = false;
+#endif
 		FTS_INFO("%s Tp enter suspend, set old_point_id as default value\n", __func__);
 		fts_irq_enable();
 		ret = fts_palm_enable(ts_data, 0);
@@ -2598,7 +2583,7 @@ static int fts_ts_suspend(struct device *dev)
 		goto release_finger;
 	}
 #endif
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 /* fod status = -1 as default value, means fingerprint is not enabled*
  * fod_status = 100 as all fingers in the system is deleted
  * aod_status != 0 means single tap in aod is supported
@@ -2616,11 +2601,15 @@ static int fts_ts_suspend(struct device *dev)
 			goto sleep_mode;
 		}
 
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 		fts_ts_clear_buffer();
+#endif
 		fts_irq_enable();
 		ts_data->suspended = true;
 		ts_data->old_point_id = 0xff;
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 		ts_data->point_id_changed = false;
+#endif
 		FTS_INFO("%s Tp enter suspend, set old_point_id as default value\n", __func__);
 		ret = fts_palm_enable(ts_data, 0);
 		if (!ret)
@@ -2655,7 +2644,7 @@ release_finger:
 	mutex_lock(&fts_data->report_mutex);
 	fts_release_all_finger();
 	mutex_unlock(&fts_data->report_mutex);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	mutex_unlock(&ts_data->fod_mutex);
 #endif
 	FTS_FUNC_EXIT();
@@ -2690,7 +2679,7 @@ static int fts_ts_resume(struct device *dev)
 
 
 #ifndef CONFIG_FACTORY_BUILD
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	FTS_INFO("%s finger_in_fod:%d fod_finger_skip:%d\n", __func__, ts_data->finger_in_fod, ts_data->fod_finger_skip);
 	if (ts_data->pdata->reset_when_resume && !ts_data->finger_in_fod && !ts_data->fod_finger_skip) {
 		FTS_ERROR("fod-----reset when resume");
@@ -2720,7 +2709,7 @@ static int fts_ts_resume(struct device *dev)
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	if (fts_data->finger_in_fod) {
 		fts_fod_reg_write(ts_data->client, FTS_REG_GESTURE_FOD_NO_CAL, true);
 	}
@@ -2728,14 +2717,14 @@ static int fts_ts_resume(struct device *dev)
 
 	fts_tp_state_recovery(ts_data->client);
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_resume();
 #endif
 
 #if FTS_GESTURE_EN
 	if (fts_gesture_resume(ts_data->client) == 0) {
 		ts_data->suspended = false;
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 	if (ts_data->palm_sensor_switch) {
 		fts_palm_enable(ts_data, 1);
 		ts_data->palm_sensor_changed = true;
@@ -2745,12 +2734,12 @@ static int fts_ts_resume(struct device *dev)
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	fts_gesture_reg_write(ts_data->client, FTS_REG_GESTURE_DOUBLETAP_ON, false);
 #endif
 	ts_data->suspended = false;
 	fts_irq_enable();
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 	if (ts_data->palm_sensor_switch) {
 		fts_palm_enable(ts_data, 1);
 		ts_data->palm_sensor_changed = true;
@@ -2767,14 +2756,14 @@ static int fts_pm_suspend(struct device *dev)
 	int ret = 0;
 	ts_data->dev_pm_suspend = true;
 
-#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (!IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	if (ts_data->lpwg_mode) {
 #endif
 		ret = enable_irq_wake(ts_data->irq);
 		if (ret) {
 			FTS_INFO("enable_irq_wake(irq:%d) failed", ts_data->irq);
 		}
-#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (!IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	}
 #endif
 	reinit_completion(&ts_data->dev_pm_suspend_completion);
@@ -2788,14 +2777,14 @@ static int fts_pm_resume(struct device *dev)
 
 	ts_data->dev_pm_suspend = false;
 
-#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (!IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	if (ts_data->lpwg_mode) {
 #endif
 		ret = disable_irq_wake(ts_data->irq);
 		if (ret) {
 			FTS_INFO("disable_irq_wake(irq:%d) failed", ts_data->irq);
 		}
-#if !IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (!IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	}
 #endif
 	complete(&ts_data->dev_pm_suspend_completion);

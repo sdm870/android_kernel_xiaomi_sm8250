@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010-2011 Canonical Ltd <jeremy.kerr@canonical.com>
- * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (C) 2011-2012 Linaro Ltd <mturquette@linaro.org>
  * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  *
@@ -45,14 +44,14 @@ static HLIST_HEAD(clk_root_list);
 static HLIST_HEAD(clk_orphan_list);
 static LIST_HEAD(clk_notifier_list);
 
-static LIST_HEAD(clk_handoff_vdd_list);
-static bool vdd_class_handoff_completed;
-static DEFINE_MUTEX(vdd_class_list_lock);
-
 struct clk_handoff_vdd {
 	struct list_head list;
 	struct clk_vdd_class *vdd_class;
 };
+
+static LIST_HEAD(clk_handoff_vdd_list);
+static bool vdd_class_handoff_completed;
+static DEFINE_MUTEX(vdd_class_list_lock);
 
 /*
  * clk_rate_change_list is used during clk_core_set_rate_nolock() calls to
@@ -127,7 +126,6 @@ struct clk {
 	struct hlist_node clks_node;
 };
 
-
 /***           runtime pm          ***/
 static int clk_pm_runtime_get(struct clk_core *core)
 {
@@ -155,8 +153,6 @@ static void clk_pm_runtime_put(struct clk_core *core)
 /***           locking             ***/
 static void clk_prepare_lock(void)
 {
-	if (oops_in_progress)
-		return;
 	if (!mutex_trylock(&prepare_lock)) {
 		if (prepare_owner == current) {
 			prepare_refcnt++;
@@ -172,8 +168,6 @@ static void clk_prepare_lock(void)
 
 static void clk_prepare_unlock(void)
 {
-	if (oops_in_progress)
-		return;
 	WARN_ON_ONCE(prepare_owner != current);
 	WARN_ON_ONCE(prepare_refcnt == 0);
 
@@ -187,9 +181,6 @@ static unsigned long clk_enable_lock(void)
 	__acquires(enable_lock)
 {
 	unsigned long flags;
-
-	if (oops_in_progress)
-		return 1;
 
 	/*
 	 * On UP systems, spin_trylock_irqsave() always returns true, even if
@@ -217,9 +208,6 @@ static unsigned long clk_enable_lock(void)
 static void clk_enable_unlock(unsigned long flags)
 	__releases(enable_lock)
 {
-	if (oops_in_progress)
-		return;
-
 	WARN_ON_ONCE(enable_owner != current);
 	WARN_ON_ONCE(enable_refcnt == 0);
 
@@ -707,7 +695,7 @@ set_voltage_fail:
 /*
  *  Vote for a voltage level.
  */
-static int clk_vote_vdd_level(struct clk_vdd_class *vdd_class, int level)
+int clk_vote_vdd_level(struct clk_vdd_class *vdd_class, int level)
 {
 	int rc = 0;
 
@@ -726,11 +714,12 @@ static int clk_vote_vdd_level(struct clk_vdd_class *vdd_class, int level)
 
 	return rc;
 }
+EXPORT_SYMBOL_GPL(clk_vote_vdd_level);
 
 /*
  * Remove vote for a voltage level.
  */
-static int clk_unvote_vdd_level(struct clk_vdd_class *vdd_class, int level)
+int clk_unvote_vdd_level(struct clk_vdd_class *vdd_class, int level)
 {
 	int rc = 0;
 
@@ -756,6 +745,7 @@ out:
 	mutex_unlock(&vdd_class->lock);
 	return rc;
 }
+EXPORT_SYMBOL_GPL(clk_unvote_vdd_level);
 
 /*
  * Vote for a voltage level corresponding to a clock's rate.
@@ -1118,11 +1108,10 @@ runtime_put:
 static int clk_core_prepare_lock(struct clk_core *core)
 {
 	int ret;
-	if (!oops_in_progress)
-		clk_prepare_lock();
+
+	clk_prepare_lock();
 	ret = clk_core_prepare(core);
-	if (!oops_in_progress)
-		clk_prepare_unlock();
+	clk_prepare_unlock();
 
 	return ret;
 }
@@ -2342,8 +2331,6 @@ static int clk_change_rate(struct clk_core *core)
 	if (core->flags & CLK_RECALC_NEW_RATES)
 		(void)clk_calc_new_rates(core, core->new_rate);
 
-	if (core->flags & CLK_CHILD_NO_RATE_PROP)
-		return rc;
 	/*
 	 * Use safe iteration, as change_rate can actually swap parents
 	 * for certain clock types.
@@ -3232,6 +3219,8 @@ int clk_set_flags(struct clk *clk, unsigned long flags)
 	return clk->core->ops->set_flags(clk->core->hw, flags);
 }
 EXPORT_SYMBOL_GPL(clk_set_flags);
+
+/***        debugfs support        ***/
 
 #ifdef CONFIG_DEBUG_FS
 #include <linux/debugfs.h>

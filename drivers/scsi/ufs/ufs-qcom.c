@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2013-2019, Linux Foundation. All rights reserved.
- * Copyright (C) 2021 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,9 +18,8 @@
 #include <linux/phy/phy.h>
 #include <linux/phy/phy-qcom-ufs.h>
 #include <linux/clk/qcom.h>
-#include <linux/bitfield.h>
 
-#ifdef CONFIG_QCOM_BUS_SCALING
+#if IS_ENABLED(CONFIG_QCOM_BUS_SCALING)
 #include <linux/msm-bus.h>
 #endif
 
@@ -32,7 +30,6 @@
 #include "ufshci.h"
 #include "ufs-qcom-debugfs.h"
 #include "ufs_quirks.h"
-#include "ufshcd-crypto-qti.h"
 
 #define MAX_PROP_SIZE		   32
 #define VDDP_REF_CLK_MIN_UV        1200000
@@ -67,7 +64,6 @@ static int ufs_qcom_set_dme_vs_core_clk_ctrl_clear_div(struct ufs_hba *hba,
 						       u32 clk_1us_cycles,
 						       u32 clk_40ns_cycles);
 static void ufs_qcom_pm_qos_suspend(struct ufs_qcom_host *host);
-static int ufs_qcom_init_sysfs(struct ufs_hba *hba);
 
 static void ufs_qcom_dump_regs(struct ufs_hba *hba, int offset, int len,
 		char *prefix)
@@ -415,6 +411,7 @@ static int ufs_qcom_hce_enable_notify(struct ufs_hba *hba,
 	case POST_CHANGE:
 		/* check if UFS PHY moved from DISABLED to HIBERN8 */
 		err = ufs_qcom_check_hibern8(hba);
+		ufs_qcom_ice_enable(host);
 		break;
 	default:
 		dev_err(hba->dev, "%s: invalid status %d\n", __func__, status);
@@ -748,6 +745,16 @@ static int ufs_qcom_link_startup_notify(struct ufs_hba *hba,
 	return err;
 }
 
+static int ufshcd_qcom_set_vreg_load(struct ufs_vreg *vreg, int ua)
+{
+	if (!vreg)
+		return 0;
+	else if (vreg->unused)
+		return 0;
+	else
+		return regulator_set_load(vreg->reg, ua);
+
+}
 static int ufs_qcom_config_vreg(struct device *dev,
 		struct ufs_vreg *vreg, bool on)
 {
@@ -841,6 +848,9 @@ static int ufs_qcom_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 		if (host->vddp_ref_clk && ufs_qcom_is_link_off(hba))
 			ret = ufs_qcom_disable_vreg(hba->dev,
 					host->vddp_ref_clk);
+		else if (host->vddp_ref_clk && ufs_qcom_is_link_hibern8(hba))
+			ret = ufshcd_qcom_set_vreg_load(host->vddp_ref_clk,
+						host->vddp_ref_clk->min_uA);
 
 		if (host->vccq_parent && !hba->auto_bkops_enabled)
 			ufs_qcom_config_vreg(hba->dev,
@@ -878,12 +888,18 @@ static int ufs_qcom_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 				   hba->spm_lvl > UFS_PM_LVL_3))
 		ufs_qcom_enable_vreg(hba->dev,
 				      host->vddp_ref_clk);
+	else if (host->vddp_ref_clk && ufs_qcom_is_link_hibern8(hba))
+		ufshcd_qcom_set_vreg_load(host->vddp_ref_clk,
+					host->vddp_ref_clk->max_uA);
 	if (host->vccq_parent)
 		ufs_qcom_config_vreg(hba->dev, host->vccq_parent, true);
 
 	err = ufs_qcom_enable_lane_clks(host);
 	if (err)
 		goto out;
+	err = ufs_qcom_ice_resume(host);
+	if (err)
+		return err;
 
 	hba->is_sys_suspended = false;
 
@@ -1022,7 +1038,7 @@ static int ufs_qcom_get_pwr_dev_param(struct ufs_qcom_dev_params *qcom_param,
 	return 0;
 }
 
-#ifdef CONFIG_QCOM_BUS_SCALING
+#if IS_ENABLED(CONFIG_QCOM_BUS_SCALING)
 static int ufs_qcom_get_bus_vote(struct ufs_qcom_host *host,
 		const char *speed_mode)
 {
@@ -1269,12 +1285,8 @@ static void ufs_qcom_dev_ref_clk_ctrl(struct ufs_qcom_host *host, bool enable)
 		 */
 		if (enable) {
 			if (host->hba->dev_info.quirks &
-			    UFS_DEVICE_QUIRK_WAIT_AFTER_REF_CLK_UNGATE) {
-				if (!oops_in_progress)
-					usleep_range(50, 60);
-				else
-					udelay(50);
-			}
+			    UFS_DEVICE_QUIRK_WAIT_AFTER_REF_CLK_UNGATE)
+				usleep_range(50, 60);
 			else
 				udelay(1);
 		}
@@ -1467,46 +1479,6 @@ static void ufs_qcom_advertise_quirks(struct ufs_hba *hba)
 
 	if (host->disable_lpm)
 		hba->quirks |= UFSHCD_QUIRK_BROKEN_AUTO_HIBERN8;
-	/*
-	 * Inline crypto is currently broken with ufs-qcom at least because the
-	 * device tree doesn't include the crypto registers.  There are likely
-	 * to be other issues that will need to be addressed too.
-	 */
-	//hba->quirks |= UFSHCD_QUIRK_BROKEN_CRYPTO;
-}
-
-/*
- * Disable to enter in h8 if state = HIBERN8_EXITED
- * 1.exit h8 mode
- * 2.disable low power mode
- *
- */
-void ufs_enter_h8_disable(struct Scsi_Host *shost)
-{
-	struct ufs_hba *hba;
-	struct ufs_qcom_host *host;
-
-	if (shost == NULL)
-		return;
-
-	hba = shost_priv(shost);
-	host = ufshcd_get_variant(hba);
-
-	printk(KERN_ERR "Long Press :Disable UFS enter in h8 state=%d and hba->caps =%x!", hba->hibern8_on_idle.state, hba->caps);
-
-	if (hba->hibern8_on_idle.state != HIBERN8_EXITED) {
-		return;
-	}
-
-	hba->caps &= ~UFSHCD_CAP_CLK_GATING;
-	hba->caps &= ~UFSHCD_CAP_HIBERN8_WITH_CLK_GATING;
-	hba->caps &= ~UFSHCD_CAP_CLK_SCALING;
-	hba->caps &= ~UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8;
-
-	hba->ahit = FIELD_PREP(UFSHCI_AHIBERN8_TIMER_MASK, 0);
-	__raw_writel(__cpu_to_le32(hba->ahit), hba->mmio_base + REG_AUTO_HIBERNATE_IDLE_TIMER);
-	hba->quirks |= UFSHCD_QUIRK_BROKEN_AUTO_HIBERN8;
-	hba->hibern8_on_idle.state = HIBERN8_EXITED;
 }
 
 static void ufs_qcom_set_caps(struct ufs_hba *hba)
@@ -1567,16 +1539,12 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 
 	if (on && (status == POST_CHANGE)) {
 		if (!host->is_phy_pwr_on) {
-			err = phy_power_on(host->generic_phy);
+			phy_power_on(host->generic_phy);
 			host->is_phy_pwr_on = true;
-
-			if (!err)
-				atomic_set(&host->clks_on, on);
 		}
 		/* enable the device ref clock for HS mode*/
 		if (ufshcd_is_hs_mode(&hba->pwr_info))
 			ufs_qcom_dev_ref_clk_ctrl(host, true);
-
 	} else if (!on && (status == PRE_CHANGE)) {
 		/*
 		 * If auto hibern8 is enabled then the link will already
@@ -1593,6 +1561,7 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 				host->is_phy_pwr_on = false;
 			}
 		}
+
 
 		if (list_empty(head))
 			goto out;
@@ -1652,7 +1621,7 @@ static void ufs_qcom_pm_qos_req_start(struct ufs_hba *hba, struct request *req)
 
 	group = &host->pm_qos.groups[ufs_qcom_cpu_to_group(host, req->cpu)];
 
-	ufs_spin_lock_irqsave(hba->host->host_lock, flags);
+	spin_lock_irqsave(hba->host->host_lock, flags);
 	if (!host->pm_qos.is_enabled)
 		goto out;
 
@@ -1663,7 +1632,7 @@ static void ufs_qcom_pm_qos_req_start(struct ufs_hba *hba, struct request *req)
 		queue_work(host->pm_qos.workq, &group->vote_work);
 	}
 out:
-	ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
 }
 
 /* hba->host->host_lock is assumed to be held by caller */
@@ -1694,10 +1663,10 @@ static void ufs_qcom_pm_qos_req_end(struct ufs_hba *hba, struct request *req,
 		return;
 
 	if (should_lock)
-		ufs_spin_lock_irqsave(hba->host->host_lock, flags);
+		spin_lock_irqsave(hba->host->host_lock, flags);
 	__ufs_qcom_pm_qos_req_end(ufshcd_get_variant(hba), req->cpu);
 	if (should_lock)
-		ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+		spin_unlock_irqrestore(hba->host->host_lock, flags);
 }
 
 static void ufs_qcom_pm_qos_vote_work(struct work_struct *work)
@@ -1707,15 +1676,15 @@ static void ufs_qcom_pm_qos_vote_work(struct work_struct *work)
 	struct ufs_qcom_host *host = group->host;
 	unsigned long flags;
 
-	ufs_spin_lock_irqsave(host->hba->host->host_lock, flags);
+	spin_lock_irqsave(host->hba->host->host_lock, flags);
 
 	if (!host->pm_qos.is_enabled || !group->active_reqs) {
-		ufs_spin_unlock_irqrestore(host->hba->host->host_lock, flags);
+		spin_unlock_irqrestore(host->hba->host->host_lock, flags);
 		return;
 	}
 
 	group->state = PM_QOS_VOTED;
-	ufs_spin_unlock_irqrestore(host->hba->host->host_lock, flags);
+	spin_unlock_irqrestore(host->hba->host->host_lock, flags);
 
 	pm_qos_update_request(&group->req, group->latency_us);
 }
@@ -1731,15 +1700,15 @@ static void ufs_qcom_pm_qos_unvote_work(struct work_struct *work)
 	 * Check if new requests were submitted in the meantime and do not
 	 * unvote if so.
 	 */
-	ufs_spin_lock_irqsave(host->hba->host->host_lock, flags);
+	spin_lock_irqsave(host->hba->host->host_lock, flags);
 
 	if (!host->pm_qos.is_enabled || group->active_reqs) {
-		ufs_spin_unlock_irqrestore(host->hba->host->host_lock, flags);
+		spin_unlock_irqrestore(host->hba->host->host_lock, flags);
 		return;
 	}
 
 	group->state = PM_QOS_UNVOTED;
-	ufs_spin_unlock_irqrestore(host->hba->host->host_lock, flags);
+	spin_unlock_irqrestore(host->hba->host->host_lock, flags);
 
 	pm_qos_update_request_timeout(&group->req,
 		group->latency_us, UFS_QCOM_PM_QOS_UNVOTE_TIMEOUT_US);
@@ -1773,22 +1742,22 @@ static ssize_t ufs_qcom_pm_qos_enable_store(struct device *dev,
 	 * Must take the spinlock and save irqs before changing the enabled
 	 * flag in order to keep correctness of PM QoS release.
 	 */
-	ufs_spin_lock_irqsave(hba->host->host_lock, flags);
+	spin_lock_irqsave(hba->host->host_lock, flags);
 	if (enable == host->pm_qos.is_enabled) {
-		ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+		spin_unlock_irqrestore(hba->host->host_lock, flags);
 		return count;
 	}
 	host->pm_qos.is_enabled = enable;
-	ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
 
 	if (!enable)
 		for (i = 0; i < host->pm_qos.num_groups; i++) {
 			cancel_work_sync(&host->pm_qos.groups[i].vote_work);
 			cancel_work_sync(&host->pm_qos.groups[i].unvote_work);
-			ufs_spin_lock_irqsave(hba->host->host_lock, flags);
+			spin_lock_irqsave(hba->host->host_lock, flags);
 			host->pm_qos.groups[i].state = PM_QOS_UNVOTED;
 			host->pm_qos.groups[i].active_reqs = 0;
-			ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+			spin_unlock_irqrestore(hba->host->host_lock, flags);
 			pm_qos_update_request(&host->pm_qos.groups[i].req,
 				PM_QOS_DEFAULT_VALUE);
 		}
@@ -1848,9 +1817,9 @@ static ssize_t ufs_qcom_pm_qos_latency_store(struct device *dev,
 		if (ret)
 			break;
 
-		ufs_spin_lock_irqsave(hba->host->host_lock, flags);
+		spin_lock_irqsave(hba->host->host_lock, flags);
 		host->pm_qos.groups[i].latency_us = value;
-		ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+		spin_unlock_irqrestore(hba->host->host_lock, flags);
 	}
 
 	kfree(strbuf_copy);
@@ -2075,6 +2044,9 @@ static int ufs_qcom_parse_reg_info(struct ufs_qcom_host *host, char *name,
 			__func__, prop_name, ret);
 		goto out;
 	}
+	snprintf(prop_name, MAX_PROP_SIZE, "%s-min-microamp", name);
+	if (of_property_read_u32(np, prop_name, &vreg->min_uA))
+		vreg->min_uA = UFS_VREG_LPM_LOAD_UA;
 
 	vreg->reg = devm_regulator_get(dev, vreg->name);
 	if (IS_ERR(vreg->reg)) {
@@ -2185,11 +2157,6 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 	/* restore the secure configuration */
 	ufs_qcom_update_sec_cfg(hba, true);
 
-	/*
-	 * Set the vendor specific ops needed for ICE.
-	 * Default implementation if the ops are not set.
-	 */
-	ufshcd_crypto_qti_set_vops(hba);
 
 	err = ufs_qcom_bus_register(host);
 	if (err)
@@ -2262,6 +2229,12 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 	ufs_qcom_set_caps(hba);
 	ufs_qcom_advertise_quirks(hba);
 
+	err = ufs_qcom_ice_init(host);
+	if (err) {
+		if (err != -ENODEV)
+			goto out_variant_clear;
+		hba->quirks |= UFSHCD_QUIRK_BROKEN_CRYPTO;
+	}
 	ufs_qcom_set_bus_vote(hba, true);
 	ufs_qcom_setup_clocks(hba, true, POST_CHANGE);
 
@@ -2274,7 +2247,6 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 		err = 0;
 	}
 
-	ufs_qcom_init_sysfs(hba);
 
 	ufs_qcom_save_host_ptr(hba);
 
@@ -2452,8 +2424,6 @@ static int ufs_qcom_clk_scale_notify(struct ufs_hba *hba,
 		break;
 	}
 
-	if (!err)
-		atomic_set(&host->scale_up, scale_up);
 	return err;
 }
 
@@ -2588,7 +2558,7 @@ int ufs_qcom_testbus_config(struct ufs_qcom_host *host)
 	if (!host)
 		return -EINVAL;
 	hba = host->hba;
-	ufs_spin_lock_irqsave(hba->host->host_lock, flags);
+	spin_lock_irqsave(hba->host->host_lock, flags);
 	switch (host->testbus.select_major) {
 	case TSTBUS_UAWM:
 		reg = UFS_TEST_BUS_CTRL_0;
@@ -2649,12 +2619,12 @@ int ufs_qcom_testbus_config(struct ufs_qcom_host *host)
 	if (offset < 0) {
 		dev_err(hba->dev, "%s: Bad offset: %d\n", __func__, offset);
 		ret = -EINVAL;
-		ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+		spin_unlock_irqrestore(hba->host->host_lock, flags);
 		goto out;
 	}
 	mask <<= offset;
 
-	ufs_spin_unlock_irqrestore(hba->host->host_lock, flags);
+	spin_unlock_irqrestore(hba->host->host_lock, flags);
 	if (reg) {
 		ufshcd_rmwl(host->hba, TEST_BUS_SEL,
 		    (u32)host->testbus.select_major << testbus_sel_offset,
@@ -2729,7 +2699,6 @@ static void ufs_qcom_dump_dbg_regs(struct ufs_hba *hba, bool no_sleep)
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct phy *phy = host->generic_phy;
 
-	host->err_occurred = true;
 
 	ufs_qcom_dump_regs(hba, REG_UFS_SYS1CLK_1US, 16,
 			"HCI Vendor Specific Registers ");
@@ -2739,30 +2708,15 @@ static void ufs_qcom_dump_dbg_regs(struct ufs_hba *hba, bool no_sleep)
 		return;
 
 	/* sleep a bit intermittently as we are dumping too much data */
-	if (!oops_in_progress)
-		usleep_range(1000, 1100);
-	else
-		udelay(1000);
+	udelay(1000);
 	ufs_qcom_testbus_read(hba);
-	if (!oops_in_progress)
-		usleep_range(1000, 1100);
-	else
-		udelay(1000);
+	udelay(1000);
 	ufs_qcom_print_unipro_testbus(hba);
-	if (!oops_in_progress)
-		usleep_range(1000, 1100);
-	else
-		udelay(1000);
+	udelay(1000);
 	ufs_qcom_print_utp_hci_testbus(hba);
-	if (!oops_in_progress)
-		usleep_range(1000, 1100);
-	else
-		udelay(1000);
+	udelay(1000);
 	ufs_qcom_phy_dbg_register_dump(phy);
-	if (!oops_in_progress)
-		usleep_range(1000, 1100);
-	else
-		udelay(1000);
+	udelay(1000);
 }
 
 static u32 ufs_qcom_get_user_cap_mode(struct ufs_hba *hba)
@@ -2797,6 +2751,7 @@ static struct ufs_hba_variant_ops ufs_hba_qcom_vops = {
 	.add_debugfs		= ufs_qcom_dbg_add_debugfs,
 #endif
 	.get_user_cap_mode	= ufs_qcom_get_user_cap_mode,
+	.program_key		= ufs_qcom_ice_program_key,
 };
 
 static struct ufs_hba_pm_qos_variant_ops ufs_hba_pm_qos_variant_ops = {
@@ -2810,138 +2765,6 @@ static struct ufs_hba_variant ufs_hba_qcom_variant = {
 	.pm_qos_vops	= &ufs_hba_pm_qos_variant_ops,
 };
 
-/**
- * QCOM specific sysfs group and nodes
- */
-static ssize_t err_state_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n", !!host->err_occurred);
-}
-
-static DEVICE_ATTR_RO(err_state);
-
-static ssize_t power_mode_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	static const char * const names[] = {
-		"INVALID MODE",
-		"FAST MODE",
-		"SLOW MODE",
-		"INVALID MODE",
-		"FASTAUTO MODE",
-		"SLOWAUTO MODE",
-		"INVALID MODE",
-	};
-
-	/* Print current power info */
-	return scnprintf(buf, PAGE_SIZE,
-		"[Rx,Tx]: Gear[%d,%d], Lane[%d,%d], PWR[%s,%s], Rate-%c\n",
-		hba->pwr_info.gear_rx, hba->pwr_info.gear_tx,
-		hba->pwr_info.lane_rx, hba->pwr_info.lane_tx,
-		names[hba->pwr_info.pwr_rx],
-		names[hba->pwr_info.pwr_tx],
-		hba->pwr_info.hs_rate == PA_HS_MODE_B ? 'B' : 'A');
-}
-
-static DEVICE_ATTR_RO(power_mode);
-
-static ssize_t bus_speed_mode_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
-			 !!atomic_read(&host->scale_up));
-}
-
-static DEVICE_ATTR_RO(bus_speed_mode);
-
-static ssize_t clk_status_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
-			 !!atomic_read(&host->clks_on));
-}
-
-static DEVICE_ATTR_RO(clk_status);
-
-static unsigned int ufs_qcom_gec(struct ufs_hba *hba,
-				 struct ufs_uic_err_reg_hist *err_hist,
-				 char *err_name)
-{
-	unsigned long flags;
-	int i, cnt_err = 0;
-
-	spin_lock_irqsave(hba->host->host_lock, flags);
-	for (i = 0; i < UIC_ERR_REG_HIST_LENGTH; i++) {
-		int p = (i + err_hist->pos) % UIC_ERR_REG_HIST_LENGTH;
-
-		if (err_hist->tstamp[p] == 0)
-			continue;
-		dev_err(hba->dev, "%s[%d] = 0x%x at %lld us\n", err_name, p,
-			err_hist->reg[p], ktime_to_us(err_hist->tstamp[p]));
-
-		++cnt_err;
-	}
-
-	spin_unlock_irqrestore(hba->host->host_lock, flags);
-	return cnt_err;
-}
-
-static ssize_t err_count_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct ufs_hba *hba = dev_get_drvdata(dev);
-
-	return scnprintf(buf, PAGE_SIZE,
-			 "%s: %d\n%s: %d\n%s: %d\n",
-			 "pa_err_cnt_total",
-			 ufs_qcom_gec(hba, &hba->ufs_stats.pa_err,
-				      "pa_err_cnt_total"),
-			 "dl_err_cnt_total",
-			 ufs_qcom_gec(hba, &hba->ufs_stats.dl_err,
-				      "dl_err_cnt_total"),
-			 "dme_err_cnt",
-			 ufs_qcom_gec(hba, &hba->ufs_stats.dme_err,
-				      "dme_err_cnt"));
-}
-
-static DEVICE_ATTR_RO(err_count);
-
-static struct attribute *ufs_qcom_sysfs_attrs[] = {
-	&dev_attr_err_state.attr,
-	&dev_attr_power_mode.attr,
-	&dev_attr_bus_speed_mode.attr,
-	&dev_attr_clk_status.attr,
-	&dev_attr_err_count.attr,
-	NULL
-};
-
-static const struct attribute_group ufs_qcom_sysfs_group = {
-	.name = "qcom",
-	.attrs = ufs_qcom_sysfs_attrs,
-};
-
-static int ufs_qcom_init_sysfs(struct ufs_hba *hba)
-{
-	int ret;
-
-	ret = sysfs_create_group(&hba->dev->kobj, &ufs_qcom_sysfs_group);
-	if (ret)
-		dev_err(hba->dev, "%s: Failed to create qcom sysfs group (err = %d)\n",
-				 __func__, ret);
-
-	return ret;
-}
 
 /**
  * ufs_qcom_probe - probe routine of the driver

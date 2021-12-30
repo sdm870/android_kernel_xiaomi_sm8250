@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (C) 2021 XiaoMi, Inc.
  */
 
 #include <linux/module.h>
@@ -352,7 +351,6 @@ struct dwc3_msm {
 	struct mutex suspend_resume_mutex;
 
 	enum usb_device_speed override_usb_speed;
-	u32 auto_vbus_src_sel;
 
 	u32			*gsi_reg;
 	int			gsi_reg_offset_cnt;
@@ -360,6 +358,8 @@ struct dwc3_msm {
 
 	struct notifier_block	dpdm_nb;
 	struct regulator	*dpdm_reg;
+
+	u32 auto_vbus_src_sel_threshold;
 
 	u64			dummy_gsi_db;
 	dma_addr_t		dummy_gsi_db_dma;
@@ -546,7 +546,7 @@ int msm_data_fifo_config(struct usb_ep *ep, unsigned long addr,
 	return	dbm_data_fifo_config(mdwc->dbm, dep->number, addr, size,
 						dst_pipe_idx);
 }
-
+EXPORT_SYMBOL_GPL(msm_data_fifo_config);
 
 /**
  * Cleanups for msm endpoint on request complete.
@@ -1156,7 +1156,7 @@ static void gsi_endxfer_for_ep(struct usb_ep *ep)
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3	*dwc = dep->dwc;
 
-	dwc3_stop_active_transfer(dwc, dep->number, true);
+	dwc3_stop_active_transfer(dwc, dep->number, true, false);
 }
 
 /**
@@ -3721,6 +3721,31 @@ static int dwc_dpdm_cb(struct notifier_block *nb, unsigned long evt, void *p)
 	return NOTIFY_OK;
 }
 
+static ssize_t auto_vbus_src_sel_threshold_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+		mdwc->auto_vbus_src_sel_threshold);
+}
+
+static ssize_t auto_vbus_src_sel_threshold_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int ret = 0;
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+
+	ret = kstrtou32(buf, 10, &mdwc->auto_vbus_src_sel_threshold);
+
+	if (ret)
+		return ret;
+
+	return count;
+}
+static DEVICE_ATTR_RW(auto_vbus_src_sel_threshold);
+
 static ssize_t usb_data_enabled_show(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
@@ -3809,10 +3834,11 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 				"qcom,charging-disabled");
 
 	ret = of_property_read_u32(node, "google,switch-vbus",
-				   &mdwc->auto_vbus_src_sel);
+				   &mdwc->auto_vbus_src_sel_threshold);
 	if (ret) {
-		dev_dbg(&pdev->dev, "setting auto_vbus_src_sel to zero.\n");
-		mdwc->auto_vbus_src_sel = 0;
+		dev_dbg(&pdev->dev,
+			"setting auto_vbus_src_sel_threshold to zero.\n");
+		mdwc->auto_vbus_src_sel_threshold = 0;
 	}
 
 	ret = of_property_read_u32(node, "qcom,lpm-to-suspend-delay-ms",
@@ -4136,6 +4162,7 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	device_create_file(&pdev->dev, &dev_attr_speed);
 	device_create_file(&pdev->dev, &dev_attr_usb_compliance_mode);
 	device_create_file(&pdev->dev, &dev_attr_bus_vote);
+	device_create_file(&pdev->dev, &dev_attr_auto_vbus_src_sel_threshold);
 	device_create_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	return 0;
@@ -4164,6 +4191,9 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 		regulator_unregister_notifier(mdwc->dpdm_reg, &mdwc->dpdm_nb);
 		mdwc->dpdm_nb.notifier_call = NULL;
 	}
+
+	device_remove_file(&pdev->dev, &dev_attr_auto_vbus_src_sel_threshold);
+	device_remove_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	if (mdwc->usb_psy)
 		power_supply_put(mdwc->usb_psy);
@@ -4259,7 +4289,7 @@ static bool dwc3_use_external_vbus_booster(struct usb_device *udev,
 
 	if (dwc3_is_root_hub_direct_child(udev, dwc) &&
 	    udev->descriptor.bDeviceClass != USB_CLASS_HUB &&
-	    max_power < mdwc->auto_vbus_src_sel)
+	    max_power < mdwc->auto_vbus_src_sel_threshold)
 		return true;
 
 	return false;
@@ -4321,7 +4351,7 @@ static int dwc3_msm_host_notifier(struct notifier_block *nb,
 		}
 	}
 
-	if (mdwc->auto_vbus_src_sel) {
+	if (mdwc->auto_vbus_src_sel_threshold) {
 		if (event == USB_DEVICE_ADD &&
 		    dwc3_use_external_vbus_booster(udev, dwc, mdwc))
 			blocking_notifier_call_chain(&ext_vbus_notifier_list,

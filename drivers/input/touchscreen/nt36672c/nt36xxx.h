@@ -53,8 +53,6 @@
 #define PINCTRL_STATE_RELEASE		"pmx_ts_release"
 #define MI_DRM_NOTIFIER
 
-#define NVT_DEBUG 1
-
 /*---GPIO number---*/
 #define NVTTOUCH_RST_PIN 980
 #define NVTTOUCH_INT_PIN 943
@@ -69,7 +67,7 @@
 /*---SPI driver info.---*/
 #define NVT_SPI_NAME "NVT-ts-spi"
 
-#if NVT_DEBUG
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_NT36xxx_DEBUG)
 #define NVT_LOG(fmt, args...)    pr_err("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
 #else
 #define NVT_LOG(fmt, args...)    pr_info("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
@@ -96,8 +94,6 @@ extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
 /*---Customerized func.---*/
 #define NVT_TOUCH_PROC 1
 #define NVT_TOUCH_EXT_PROC 1
-#define NVT_TOUCH_MP 1
-#define NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV 1
 #define MT_PROTOCOL_B 1
 #define WAKEUP_GESTURE 1
 #define FUNCPAGE_PALM 4
@@ -110,8 +106,11 @@ extern const uint16_t gesture_key_array[];
 #define BOOT_UPDATE_FIRMWARE 1
 #define DEFAULT_BOOT_UPDATE_FIRMWARE_NAME "novatek_nt36675_j3s_fw01.bin"
 #define DEFAULT_MP_UPDATE_FIRMWARE_NAME   "novatek_nt36675_j3s_mp01.bin"
+
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
 #define DEFAULT_DEBUG_FW_NAME "novatek_debug_fw.bin"
 #define DEFAULT_DEBUG_MP_NAME "novatek_debug_mp.bin"
+#endif
 
 
 /*---ESD Protect.---*/
@@ -198,7 +197,7 @@ struct nvt_ts_data {
 	struct pinctrl *ts_pinctrl;
 	struct pinctrl_state *pinctrl_state_active;
 	struct pinctrl_state *pinctrl_state_suspend;
-#ifndef NVT_SAVE_TESTDATA_IN_FILE
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_SAVE_FILE)
 	void *testdata;
 #endif
 	int db_wakeup;
@@ -214,7 +213,7 @@ struct nvt_ts_data {
 	/*bit map indicate which slot(0~9) has been used*/
 	unsigned long slot_map[BITS_TO_LONGS(10)];
 	bool fw_debug;
-#ifdef CONFIG_TOUCHSCREEN_NVT_DEBUG_FS
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx_DEBUG_FS
 	struct dentry *debugfs;
 #endif
 	struct workqueue_struct *event_wq;

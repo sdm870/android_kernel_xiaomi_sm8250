@@ -2759,6 +2759,16 @@ out:
 	return ret;
 }
 
+static void icnss_allow_recursive_recovery(struct device *dev)
+{
+	struct icnss_priv *priv = dev_get_drvdata(dev);
+
+	priv->allow_recursive_recovery = true;
+
+	icnss_pr_info("Recursive recovery allowed for WLAN\n");
+}
+
+#ifdef CONFIG_DEBUG_FS
 static int icnss_fw_debug_show(struct seq_file *s, void *data)
 {
 	struct icnss_priv *priv = s->private;
@@ -2875,15 +2885,6 @@ power_off:
 
 out:
 	return ret;
-}
-
-static void icnss_allow_recursive_recovery(struct device *dev)
-{
-	struct icnss_priv *priv = dev_get_drvdata(dev);
-
-	priv->allow_recursive_recovery = true;
-
-	icnss_pr_info("Recursive recovery allowed for WLAN\n");
 }
 
 static void icnss_disallow_recursive_recovery(struct device *dev)
@@ -3519,6 +3520,7 @@ static void icnss_debugfs_destroy(struct icnss_priv *priv)
 {
 	debugfs_remove_recursive(priv->root_dentry);
 }
+#endif /* CONFIG_DEBUG_FS */
 
 static void icnss_sysfs_create(struct icnss_priv *priv)
 {
@@ -3549,6 +3551,7 @@ static void icnss_sysfs_destroy(struct icnss_priv *priv)
 		kobject_put(icnss_kobject);
 }
 
+#ifdef CONFIG_DEBUG_FS
 static void icnss_unregister_power_supply_notifier(struct icnss_priv *priv)
 {
 	if (priv->batt_psy)
@@ -3560,6 +3563,7 @@ static void icnss_unregister_power_supply_notifier(struct icnss_priv *priv)
 		power_supply_unreg_notifier(&priv->psf_nb);
 	}
 }
+#endif
 static int icnss_get_vbatt_info(struct icnss_priv *priv)
 {
 	struct adc_tm_chip *adc_tm_dev = NULL;
@@ -3865,7 +3869,9 @@ static int icnss_probe(struct platform_device *pdev)
 
 	icnss_enable_recovery(priv);
 
+#ifdef CONFIG_DEBUG_FS
 	icnss_debugfs_create(priv);
+#endif
 
 	icnss_sysfs_create(priv);
 
@@ -3898,9 +3904,11 @@ static int icnss_remove(struct platform_device *pdev)
 
 	device_init_wakeup(&penv->pdev->dev, false);
 
+#ifdef CONFIG_DEBUG_FS
 	icnss_unregister_power_supply_notifier(penv);
 
 	icnss_debugfs_destroy(penv);
+#endif
 
 	icnss_sysfs_destroy(penv);
 
@@ -4099,4 +4107,4 @@ module_init(icnss_initialize);
 module_exit(icnss_exit);
 
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION(DEVICE "iCNSS CORE platform driver");
+MODULE_DESCRIPTION("iCNSS CORE platform driver");

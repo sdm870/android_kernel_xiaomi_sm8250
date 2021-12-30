@@ -1124,15 +1124,15 @@ void Boot_Update_Firmware(struct work_struct *work)
 
 	nvt_match_fw();
 	mutex_lock(&ts->lock);
-	if (nvt_get_dbgfw_status()) {
-		ret = nvt_update_firmware(DEFAULT_DEBUG_FW_NAME);
-		if (ret < 0) {
-			NVT_ERR("use built-in fw");
-			ret = nvt_update_firmware(ts->fw_name);
-		}
-	} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+	ret = nvt_update_firmware(DEFAULT_DEBUG_FW_NAME);
+	if (ret < 0) {
+		NVT_ERR("use built-in fw");
 		ret = nvt_update_firmware(ts->fw_name);
 	}
+#else
+	ret = nvt_update_firmware(ts->fw_name);
+#endif
 	nvt_get_fw_info();
 	if (!ret) {
 		ts->boot_firmware_updated = true;

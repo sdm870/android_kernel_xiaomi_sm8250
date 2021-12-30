@@ -1,5 +1,5 @@
 . ${ROOT_DIR}/${KERNEL_DIR}/build.config.common
-BUILD_INITRAMFS=1
+BUILD_INITRAMFS=0
 EXT_MODULES="
 private/msm-google-modules/wlan/qcacld-3.0
 private/msm-google-modules/data-kernel/drivers/rmnet/perf
@@ -7,26 +7,31 @@ private/msm-google-modules/data-kernel/drivers/rmnet/shs
 "
 
 if [ -n "${BUILD_BOOT_IMG}" ]; then
-BUILD_INITRAMFS=1
-LZ4_RAMDISK=1
-MKBOOTIMG_PATH=tools/mkbootimg/mkbootimg.py
-KERNEL_BINARY=Image
-BASE_ADDRESS=0x00000000
-PAGE_SIZE=4096
-KERNEL_VENDOR_CMDLINE="androidboot.verifiedbootstate=green androidboot.vbmeta.device_state=locked console=ttyMSM0,115200n8 androidboot.console=ttyMSM0 printk.devkmsg=on androidboot.hardware=gourami androidboot.hardware.platform=sm8250 msm_rtb.filter=0x237 ehci-hcd.park=3service_locator.enable=1 androidboot.memcg=1 cgroup.memory=nokmem lpm_levels.sleep_disabled=1 usbcore.autosuspend=7 androidboot.usbcontroller=a600000.dwc3 swiotlb=2048 loop.max_part=7 kpti=off"
+    LZ4_RAMDISK=1
+    PAGE_SIZE=4096
+    TAGS_OFFSET=0x100
+    KERNEL_BINARY=Image
+    BASE_ADDRESS=0x00000000
+    RAMDISK_OFFSET=0x1000000
+    MKBOOTIMG_PATH=tools/mkbootimg/mkbootimg.py
+    # Set OS Version and OS Patch Level here (IMPORTANT!)
+    MKBOOTIMG_EXTRA_ARGS="--os_version 12 --os_patch_level "2021-12""
+    KERNEL_VENDOR_CMDLINE="androidboot.verifiedbootstate=green androidboot.vbmeta.device_state=locked console=ttyMSM0,115200n8 androidboot.console=ttyMSM0 printk.devkmsg=on androidboot.hardware=gourami androidboot.hardware.platform=sm8250 msm_rtb.filter=0x237 ehci-hcd.park=3 service_locator.enable=1 androidboot.memcg=1 cgroup.memory=nokmem lpm_levels.sleep_disabled=1 usbcore.autosuspend=7 androidboot.usbcontroller=a600000.dwc3 swiotlb=2048 loop.max_part=7 kpti=off buildvariant=user"
 
-if [ "${BRANCH}" = "android-msm-alioth-4.19" ]; then
-GKI_RAMDISK_PREBUILT_BINARY=${ROOT_DIR}/prebuilts/boot-artifacts/ramdisks/ramdisk-hentai-ab_arm64.img
-VENDOR_RAMDISK_BINARY=${ROOT_DIR}/prebuilts/boot-artifacts/ramdisks/vendor_ramdisk-hentai-ab_arm64.img
-BOOT_IMAGE_HEADER_VERSION=3
-else
-GKI_RAMDISK_PREBUILT_BINARY=${ROOT_DIR}/prebuilts/boot-artifacts/ramdisks/ramdisk-hentai-a_arm64.img
-BOOT_IMAGE_HEADER_VERSION=2
-fi
+    if [ "${BRANCH}" = "android-msm-alioth-4.19" ]; then
+        GKI_RAMDISK_PREBUILT_BINARY=${ROOT_DIR}/prebuilts/boot-artifacts/ramdisks/ramdisk-hentai-ab_arm64.img
+        VENDOR_RAMDISK_BINARY=${ROOT_DIR}/prebuilts/boot-artifacts/ramdisks/vendor_ramdisk-hentai-ab_arm64.img
+        BOOT_IMAGE_HEADER_VERSION=3
+    else
+        # Contrary to the belief, we're using Vendor RAMDisk for A
+        VENDOR_RAMDISK_BINARY=${ROOT_DIR}/prebuilts/boot-artifacts/ramdisks/gki-ramdisk.lz4
+        BOOT_IMAGE_HEADER_VERSION=2
+        SKIP_VENDOR_BOOT=1
+    fi
 
-# Enable chained vbmeta for boot images
-AVB_SIGN_BOOT_IMG=1
-AVB_BOOT_PARTITION_SIZE=0x06000000
-AVB_BOOT_KEY=${ROOT_DIR}/prebuilts/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
-AVB_BOOT_ALGORITHM=SHA256_RSA2048
+    # Enable chained vbmeta for boot images
+    AVB_SIGN_BOOT_IMG=1
+    AVB_BOOT_PARTITION_SIZE=0x8000000
+    AVB_BOOT_KEY=${ROOT_DIR}/prebuilts/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
+    AVB_BOOT_ALGORITHM=SHA256_RSA2048
 fi

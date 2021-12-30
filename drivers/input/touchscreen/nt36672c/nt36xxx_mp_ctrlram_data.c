@@ -1,6 +1,6 @@
 #include "nt36xxx.h"
 
-#if NVT_TOUCH_MP
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP)
 
 uint32_t IC_X_CFG_SIZE = 18;
 uint32_t IC_Y_CFG_SIZE = 36;

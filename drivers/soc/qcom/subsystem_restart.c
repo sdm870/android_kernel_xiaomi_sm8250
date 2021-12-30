@@ -230,11 +230,13 @@ void complete_err_ready(struct subsys_device *subsys)
 {
 	complete(&subsys->err_ready);
 }
+EXPORT_SYMBOL(complete_err_ready);
 
 void complete_shutdown_ack(struct subsys_device *subsys)
 {
 	complete(&subsys->shutdown_ack);
 }
+EXPORT_SYMBOL(complete_shutdown_ack);
 
 static struct subsys_tracking *subsys_get_track(struct subsys_device *subsys)
 {

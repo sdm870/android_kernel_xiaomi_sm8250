@@ -27,7 +27,7 @@
 #include "nt36xxx.h"
 #include "nt36xxx_mp_ctrlram.h"
 
-#if NVT_TOUCH_MP
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP)
 
 #define NORMAL_MODE 0x00
 #define TEST_MODE_1 0x21
@@ -80,8 +80,7 @@ static int32_t *RawData_FW_CC = NULL;
 static struct proc_dir_entry *NVT_proc_selftest_entry = NULL;
 static struct proc_dir_entry *NVT_proc_aftersales_test_entry;
 
-
-#ifndef NVT_SAVE_TESTDATA_IN_FILE
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_SAVE_FILE)
 static struct proc_dir_entry *NVT_proc_test_data_entry = NULL;
 #endif
 
@@ -368,7 +367,7 @@ static void nvt_print_criteria(void)
 	NVT_LOG("--\n");
 }
 
-#ifndef NVT_SAVE_TESTDATA_IN_FILE
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_SAVE_FILE)
 void dump_buff(int32_t *rawdata, uint8_t x_ch, uint8_t y_ch)
 {
 	int32_t y = 0;
@@ -1294,7 +1293,7 @@ const struct seq_operations nvt_selftest_seq_ops = {
 	.show   = c_show_selftest
 };
 
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 static void goto_next_line(char **ptr)
 {
 	do {
@@ -1662,7 +1661,7 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 {
 	struct device_node *np = ts->client->dev.of_node;
 	unsigned char mpcriteria[32] = {0};	/*novatek-mp-criteria-default*/
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	char mp_setting_criteria_csv_filename[64] = {0};
 #endif /* NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV */
 
@@ -1686,14 +1685,14 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 	/*---Download MP FW---*/
-	if (nvt_get_dbgfw_status()) {
-		if (nvt_update_firmware(DEFAULT_DEBUG_MP_NAME) < 0) {
-			NVT_ERR("use built-in fw");
-			nvt_update_firmware(ts->mp_name);
-		}
-	} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+	if (nvt_update_firmware(DEFAULT_DEBUG_MP_NAME) < 0) {
+		NVT_ERR("use built-in fw");
 		nvt_update_firmware(ts->mp_name);
 	}
+#else
+	nvt_update_firmware(ts->mp_name);
+#endif
 
 	if (nvt_get_fw_info()) {
 		mutex_unlock(&ts->lock);
@@ -1701,7 +1700,7 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 		return -EAGAIN;
 	}
 	fw_ver = ts->fw_ver;
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	/*---Check if MP Setting Criteria CSV file exist and load---*/
 	snprintf(mp_setting_criteria_csv_filename, sizeof(mp_setting_criteria_csv_filename), "NT36xxx_MP_Setting_Criteria_%04X.csv", ts->nvt_pid);
 	NVT_LOG("MP setting criteria csv filename: %s\n", mp_setting_criteria_csv_filename);
@@ -1732,7 +1731,7 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 			/*---Print Test Criteria---*/
 			nvt_print_criteria();
 		}
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	} else {
 		NVT_LOG("SelfTest MP setting criteria loaded from CSV file\n");
 	}
@@ -1830,14 +1829,14 @@ static int32_t nvt_selftest_open(struct inode *inode, struct file *file)
 	}
 
 	/*---Download Normal FW---*/
-	if (nvt_get_dbgfw_status()) {
-		if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
-			NVT_ERR("use built-in fw");
-			nvt_update_firmware(ts->fw_name);
-		}
-	} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+	if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
+		NVT_ERR("use built-in fw");
 		nvt_update_firmware(ts->fw_name);
 	}
+#else
+	nvt_update_firmware(ts->fw_name);
+#endif
 
 	mutex_unlock(&ts->lock);
 
@@ -1887,7 +1886,7 @@ int32_t nvt_mp_parse_ain(struct device_node *np, const char *name, uint8_t *arra
 		for (i = 0; i < len; i++)
 			array[i] = tmp[i];
 
-#if NVT_DEBUG
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_NT36xxx_DEBUG)
 		printk("[NVT-ts] %s = ", name);
 		nvt_print_result_log_in_one_line(array, len);
 		printk("\n");
@@ -1913,7 +1912,7 @@ int32_t nvt_mp_parse_u32(struct device_node *np, const char *name, int32_t *para
 		NVT_ERR("error reading %s. ret=%d\n", name, ret);
 		return -1;
 	} else {
-#if NVT_DEBUG
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_NT36xxx_DEBUG)
 		NVT_LOG("%s=%d\n", name, *para);
 #endif
 	}
@@ -1933,7 +1932,7 @@ int32_t nvt_mp_parse_array(struct device_node *np, const char *name, int32_t *ar
 {
 	struct property *data;
 	int32_t len, ret;
-#if NVT_DEBUG
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_NT36xxx_DEBUG)
 	int32_t j = 0;
 #endif
 
@@ -1950,7 +1949,7 @@ int32_t nvt_mp_parse_array(struct device_node *np, const char *name, int32_t *ar
 			return -1;
 		}
 
-#if NVT_DEBUG
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_NT36xxx_DEBUG)
 		NVT_LOG("%s =\n", name);
 		for (j = 0; j < Y_Channel; j++) {
 			nvt_print_data_log_in_one_line(array + j * X_Channel, X_Channel);
@@ -2077,7 +2076,7 @@ static int nvt_short_test(void)
 {
 	struct device_node *np = ts->client->dev.of_node;
 	unsigned char mpcriteria[32] = {0};	/*novatek-mp-criteria-default*/
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	char mp_setting_criteria_csv_filename[64] = {0};
 #endif /* NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV */
 
@@ -2094,14 +2093,14 @@ static int nvt_short_test(void)
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 	/*---Download MP FW---*/
-	if (nvt_get_dbgfw_status()) {
-		if (nvt_update_firmware(DEFAULT_DEBUG_MP_NAME) < 0) {
-			NVT_ERR("use built-in fw");
-			nvt_update_firmware(ts->mp_name);
-		}
-	} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+	if (nvt_update_firmware(DEFAULT_DEBUG_MP_NAME) < 0) {
+		NVT_ERR("use built-in fw");
 		nvt_update_firmware(ts->mp_name);
 	}
+#else
+	nvt_update_firmware(ts->mp_name);
+#endif
 
 	if (nvt_get_fw_info()) {
 		mutex_unlock(&ts->lock);
@@ -2109,7 +2108,7 @@ static int nvt_short_test(void)
 		return -EAGAIN;
 	}
 	fw_ver = ts->fw_ver;
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	/*---Check if MP Setting Criteria CSV file exist and load---*/
 	snprintf(mp_setting_criteria_csv_filename, sizeof(mp_setting_criteria_csv_filename), "NT36xxx_MP_Setting_Criteria_%04X.csv", ts->nvt_pid);
 	NVT_LOG("MP setting criteria csv filename: %s\n", mp_setting_criteria_csv_filename);
@@ -2130,14 +2129,14 @@ static int nvt_short_test(void)
 
 			if (nvt_mp_parse_dt(np, mpcriteria)) {
 				/*---Download Normal FW---*/
-				if (nvt_get_dbgfw_status()) {
-					if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
-						NVT_ERR("use built-in fw");
-						nvt_update_firmware(ts->fw_name);
-					}
-				} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+				if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
+					NVT_ERR("use built-in fw");
 					nvt_update_firmware(ts->fw_name);
 				}
+#else
+				nvt_update_firmware(ts->fw_name);
+#endif
 				mutex_unlock(&ts->lock);
 				NVT_ERR("mp parse device tree failed!\n");
 				return -EINVAL;
@@ -2147,7 +2146,7 @@ static int nvt_short_test(void)
 			/*---Print Test Criteria---*/
 			nvt_print_criteria();
 		}
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	} else {
 		NVT_LOG("SelfTest MP setting criteria loaded from CSV file\n");
 	}
@@ -2177,14 +2176,14 @@ static int nvt_short_test(void)
 	}
 
 	/*---Download Normal FW---*/
-	if (nvt_get_dbgfw_status()) {
-		if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
-			NVT_ERR("use built-in fw");
-			nvt_update_firmware(ts->fw_name);
-		}
-	} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+	if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
+		NVT_ERR("use built-in fw");
 		nvt_update_firmware(ts->fw_name);
 	}
+#else
+	nvt_update_firmware(ts->fw_name);
+#endif
 
 	mutex_unlock(&ts->lock);
 
@@ -2198,7 +2197,7 @@ static int nvt_open_test(void)
 {
 	struct device_node *np = ts->client->dev.of_node;
 	unsigned char mpcriteria[32] = {0};	/*novatek-mp-criteria-default*/
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	char mp_setting_criteria_csv_filename[64] = {0};
 #endif /* NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV */
 
@@ -2215,14 +2214,14 @@ static int nvt_open_test(void)
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 	/*---Download MP FW---*/
-	if (nvt_get_dbgfw_status()) {
-		if (nvt_update_firmware(DEFAULT_DEBUG_MP_NAME) < 0) {
-			NVT_ERR("use built-in fw");
-			nvt_update_firmware(ts->mp_name);
-		}
-	} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+	if (nvt_update_firmware(DEFAULT_DEBUG_MP_NAME) < 0) {
+		NVT_ERR("use built-in fw");
 		nvt_update_firmware(ts->mp_name);
 	}
+#else
+	nvt_update_firmware(ts->mp_name);
+#endif
 
 
 	if (nvt_get_fw_info()) {
@@ -2231,7 +2230,7 @@ static int nvt_open_test(void)
 		return -EAGAIN;
 	}
 	fw_ver = ts->fw_ver;
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	/*---Check if MP Setting Criteria CSV file exist and load---*/
 	snprintf(mp_setting_criteria_csv_filename, sizeof(mp_setting_criteria_csv_filename), "NT36xxx_MP_Setting_Criteria_%04X.csv", ts->nvt_pid);
 	NVT_LOG("MP setting criteria csv filename: %s\n", mp_setting_criteria_csv_filename);
@@ -2252,14 +2251,14 @@ static int nvt_open_test(void)
 
 			if (nvt_mp_parse_dt(np, mpcriteria)) {
 				/*---Download Normal FW---*/
-				if (nvt_get_dbgfw_status()) {
-					if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
-						NVT_ERR("use built-in fw");
-						nvt_update_firmware(ts->fw_name);
-					}
-				} else {
+			#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+				if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
+					NVT_ERR("use built-in fw");
 					nvt_update_firmware(ts->fw_name);
 				}
+			#else
+				nvt_update_firmware(ts->fw_name);
+			#endif
 				mutex_unlock(&ts->lock);
 				NVT_ERR("mp parse device tree failed!\n");
 				return -EINVAL;
@@ -2269,7 +2268,7 @@ static int nvt_open_test(void)
 			/*---Print Test Criteria---*/
 			nvt_print_criteria();
 		}
-#if NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_FROM_CSV)
 	} else {
 		NVT_LOG("SelfTest MP setting criteria loaded from CSV file\n");
 	}
@@ -2299,14 +2298,14 @@ static int nvt_open_test(void)
 	}
 
 	/*---Download Normal FW---*/
-	if (nvt_get_dbgfw_status()) {
-		if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
-			NVT_ERR("use built-in fw");
-			nvt_update_firmware(ts->fw_name);
-		}
-	} else {
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_DEBUG)
+	if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
+		NVT_ERR("use built-in fw");
 		nvt_update_firmware(ts->fw_name);
 	}
+#else
+	nvt_update_firmware(ts->fw_name);
+#endif
 
 	mutex_unlock(&ts->lock);
 
@@ -2435,7 +2434,7 @@ void nvt_mp_proc_deinit(void)
 	}
 }
 
-#ifndef NVT_SAVE_TESTDATA_IN_FILE
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_SAVE_FILE)
 static void test_buff_free(struct test_buf *buf)
 {
 	if(buf) {
@@ -2678,4 +2677,4 @@ void nvt_test_data_proc_deinit(void)
 	}
 }
 #endif /*ifndef NVT_SAVE_TESTDATA_IN_FILE*/
-#endif /* #if NVT_TOUCH_MP */
+#endif /* #if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP) */

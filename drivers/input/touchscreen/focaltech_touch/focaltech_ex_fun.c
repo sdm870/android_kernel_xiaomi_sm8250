@@ -112,7 +112,7 @@ static ssize_t fts_debug_write(struct file *filp, const char __user *buff, size_
 	switch (ts_data->proc_opmode) {
 	case PROC_SET_TEST_FLAG:
 		FTS_INFO("[APK]: PROC_SET_TEST_FLAG = %x!!", writebuf[1]);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 		if (writebuf[1] == 0) {
 			fts_esdcheck_switch(ENABLE);
 		} else {
@@ -194,7 +194,7 @@ static ssize_t fts_debug_read(struct file *filp, char __user *buff, size_t count
 		FTS_ERROR("apk proc read count(%d) fail", (int)count);
 		return -EINVAL;
 	}
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(1);
 #endif
 
@@ -203,7 +203,7 @@ static ssize_t fts_debug_read(struct file *filp, char __user *buff, size_t count
 		readlen = 1;
 		ret = fts_i2c_read(client, NULL, 0, buf, readlen);
 		if (ret < 0) {
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 			fts_esdcheck_proc_busy(0);
 #endif
 			FTS_ERROR("[APK]: read iic error!!");
@@ -215,7 +215,7 @@ static ssize_t fts_debug_read(struct file *filp, char __user *buff, size_t count
 		readlen = count;
 		ret = fts_i2c_read(client, NULL, 0, buf, readlen);
 		if (ret < 0) {
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 			fts_esdcheck_proc_busy(0);
 #endif
 			FTS_ERROR("[APK]: read iic error!!");
@@ -230,7 +230,7 @@ static ssize_t fts_debug_read(struct file *filp, char __user *buff, size_t count
 		break;
 	}
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(0);
 #endif
 
@@ -281,7 +281,7 @@ static int fts_debug_write(struct file *filp, const char __user *buff, unsigned 
 	switch (ts_data->proc_opmode) {
 	case PROC_SET_TEST_FLAG:
 		FTS_DEBUG("[APK]: PROC_SET_TEST_FLAG = %x!!", writebuf[1]);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 		if (writebuf[1] == 0) {
 			fts_esdcheck_switch(ENABLE);
 		} else {
@@ -365,7 +365,7 @@ static int fts_debug_read(char *page, char **start, off_t off, int count, int *e
 		FTS_ERROR("apk proc read count(%d) fail", (int)count);
 		return -EINVAL;
 	}
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(1);
 #endif
 	switch (ts_data->proc_opmode) {
@@ -373,7 +373,7 @@ static int fts_debug_read(char *page, char **start, off_t off, int count, int *e
 		readlen = 1;
 		ret = fts_i2c_read(client, NULL, 0, buf, readlen);
 		if (ret < 0) {
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 			fts_esdcheck_proc_busy(0);
 #endif
 			FTS_ERROR("[APK]: read iic error!!");
@@ -385,7 +385,7 @@ static int fts_debug_read(char *page, char **start, off_t off, int count, int *e
 		readlen = count;
 		ret = fts_i2c_read(client, NULL, 0, buf, readlen);
 		if (ret < 0) {
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 			fts_esdcheck_proc_busy(0);
 #endif
 			FTS_ERROR("[APK]: read iic error!!");
@@ -400,7 +400,7 @@ static int fts_debug_read(char *page, char **start, off_t off, int count, int *e
 		break;
 	}
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(0);
 #endif
 
@@ -409,6 +409,7 @@ static int fts_debug_read(char *page, char **start, off_t off, int count, int *e
 }
 #endif
 
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_DEBUG))
 /************************************************************************
 * Name: fts_create_apk_debug_channel
 * Brief:  create apk debug channel
@@ -456,7 +457,7 @@ void fts_release_apk_debug_channel(struct fts_ts_data *ts_data)
 #endif
 	}
 }
-
+#endif
 /************************************************************************
  * sysfs interface
  ***********************************************************************/
@@ -519,13 +520,13 @@ static ssize_t fts_tpfwver_show(struct device *dev, struct device_attribute *att
 
 	mutex_lock(&input_dev->mutex);
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(1);
 #endif
 	if (fts_i2c_read_reg(client, FTS_REG_FW_VER, &fwver) < 0) {
 		num_read_chars = snprintf(buf, PAGE_SIZE, "I2c transfer error!\n");
 	}
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(0);
 #endif
 	if ((fwver == 0xFF) || (fwver == 0x00))
@@ -741,7 +742,7 @@ static ssize_t fts_tprwreg_store(struct device *dev, struct device_attribute *at
 		rw_op.len = fts_parse_buf(buf, cmd_length);
 	}
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(1);
 #endif
 	if (rw_op.len < 0) {
@@ -787,7 +788,7 @@ static ssize_t fts_tprwreg_store(struct device *dev, struct device_attribute *at
 		}
 	}
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(0);
 #endif
 	mutex_unlock(&input_dev->mutex);
@@ -822,13 +823,13 @@ static ssize_t fts_fwupgradebin_store(struct device *dev, struct device_attribut
 	mutex_lock(&input_dev->mutex);
 	ts_data->fw_loading = 1;
 	fts_irq_disable();
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_switch(DISABLE);
 #endif
 
 	fts_upgrade_bin(client, fwname, 0);
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_switch(ENABLE);
 #endif
 	fts_irq_enable();
@@ -865,13 +866,13 @@ static ssize_t fts_fwforceupg_store(struct device *dev, struct device_attribute 
 	mutex_lock(&input_dev->mutex);
 	ts_data->fw_loading = 1;
 	fts_irq_disable();
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_switch(DISABLE);
 #endif
 
 	fts_upgrade_bin(client, fwname, 1);
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_switch(ENABLE);
 #endif
 	fts_irq_enable();
@@ -917,7 +918,7 @@ static ssize_t fts_dumpreg_show(struct device *dev, struct device_attribute *att
 	struct input_dev *input_dev = fts_data->input_dev;
 
 	mutex_lock(&input_dev->mutex);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(1);
 #endif
 	fts_i2c_read_reg(client, FTS_REG_POWER_MODE, &val);
@@ -952,7 +953,7 @@ static ssize_t fts_dumpreg_show(struct device *dev, struct device_attribute *att
 
 	fts_i2c_read_reg(client, FTS_REG_FLOW_WORK_CNT, &val);
 	count += snprintf(buf + count, PAGE_SIZE, "ESD count:0x%02x\n", val);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_proc_busy(0);
 #endif
 

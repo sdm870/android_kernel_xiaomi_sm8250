@@ -11,13 +11,21 @@ config TOUCHSCREEN_FTS
 		If unsure, say N.
 
 config TOUCHSCREEN_FTS_FOD
-	bool "Touch Support New Game Mode"
+	bool "Touch Support Fingerprint On Display"
 	depends on TOUCHSCREEN_FTS
 	default n
 	help
-		Say Y here if the device support new game mode
+		Say Y here if the device support UFDPS.
 
 		If not support, say N.
+
+config TOUCHSCREEN_FTS_DEBUG
+	bool "Focaltech Touchscreen Debug"
+	depends on TOUCHSCREEN_FTS
+	default n
+	help
+		Say Y here if you have Focaltech touch panel debug.
+		If unsure, say N.
 
 config TOUCHSCREEN_FTS_TEST
 	bool "Focaltech Touchscreen Test"

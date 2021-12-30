@@ -358,7 +358,7 @@ static int of_read_regs(struct device *dev, struct reg_info **regs_ref,
 	return reg_count;
 }
 
-#if defined(CONFIG_QCOM_BUS_SCALING)
+#if IS_ENABLED(CONFIG_QCOM_BUS_SCALING)
 static int of_read_bus_pdata(struct platform_device *pdev,
 			     struct pil_tz_data *d)
 {
@@ -438,7 +438,8 @@ static int piltz_resc_init(struct platform_device *pdev, struct pil_tz_data *d)
 	}
 	d->proxy_reg_count = count;
 
-	if (of_find_property(dev->of_node, "qcom,msm-bus,name", &len)) {
+	if (of_find_property(dev->of_node, "qcom,msm-bus,name", &len) &&
+	    of_find_property(dev->of_node, "qcom,msm-bus,num-cases", &len)) {
 		d->enable_bus_scaling = true;
 		rc = of_read_bus_pdata(pdev, d);
 		if (rc) {
@@ -827,15 +828,6 @@ static void log_failure_reason(struct pil_tz_data *d)
 	strlcpy(reason, smem_reason, min(size, (size_t)MAX_SSR_REASON_LEN));
 	spin_unlock_irqrestore(&d->subsys_desc.ssr_sysfs_lock, flags);
 	pr_err("%s subsystem failure reason: %s.\n", name, reason);
-	/*
-	 * b/153927201 - DEBUG only:
-	 * Trigger full ramdump for specific SSR signature
-	 */
-	if (!strcmp(name, "modem")) {
-		if (strnstr(reason, "wal_css_sm.c:css_wakeup_wcss:358",
-				strlen(reason)))
-			BUG();
-	}
 }
 
 static int subsys_shutdown(const struct subsys_desc *subsys, bool force_stop)

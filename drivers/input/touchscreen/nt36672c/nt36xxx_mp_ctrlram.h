@@ -17,7 +17,7 @@
  *
  */
 
-#if NVT_TOUCH_MP
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP)
 
 extern uint32_t IC_X_CFG_SIZE;
 extern uint32_t IC_Y_CFG_SIZE;
@@ -53,7 +53,7 @@ extern int32_t PS_Config_Lmt_FW_Diff_N[40 * 40];
 
 extern int32_t PS_Config_Diff_Test_Frame;
 
-#ifndef NVT_SAVE_TESTDATA_IN_FILE
+#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_SAVE_FILE)
 #define	TEST_BUF_LEN	5000
 
 enum test_type
@@ -89,6 +89,6 @@ struct test_buf
 int32_t nvt_test_data_proc_init(struct spi_device *client);
 void nvt_test_data_proc_deinit(void);
 
-#endif /*#ifndef NVT_SAVE_TESTDATA_IN_FILE*/
+#endif /*#if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP_SAVE_FILE)*/
 
-#endif /* #if NVT_TOUCH_MP */
+#endif /* #if IS_ENABLED(TOUCHSCREEN_NT36xxx_MP) */

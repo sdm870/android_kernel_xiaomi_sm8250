@@ -1521,7 +1521,7 @@ static void fts_fwupg_work(struct work_struct *work)
 	FTS_INFO("fw upgrade work function");
 	ts_data->fw_loading = 1;
 	fts_irq_disable();
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_switch(DISABLE);
 #endif
 
@@ -1535,10 +1535,10 @@ static void fts_fwupg_work(struct work_struct *work)
 		fts_fwupg_auto_upgrade(ts_data);
 	}
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 	fts_esdcheck_switch(ENABLE);
 #endif
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	fts_fod_recovery(ts_data->client);
 #endif
 	fts_irq_enable();

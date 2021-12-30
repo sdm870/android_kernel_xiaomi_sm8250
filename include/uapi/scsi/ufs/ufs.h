@@ -22,6 +22,18 @@ enum flag_idn {
 	QUERY_FLAG_IDN_WB_BUFF_FLUSH_DURING_HIBERN8     = 0x10,
 	/* use one reserved bit */
 	QUERY_FLAG_IDN_MANUAL_GC_CONT                   = 0x0E,
+#if defined(CONFIG_UFSHPB_TOSHIBA) || defined(CONFIG_UFSHPB_31)
+	QUERY_FLAG_IDN_HPB_RESET  = 0x11,
+	QUERY_FLAG_IDN_HPB_ENABLE = 0x21,
+#endif
+#if defined(CONFIG_UFSTW_31)
+	QUERY_FLAG_IDN_TW_EN                            = 0x0E,
+	QUERY_FLAG_IDN_TW_BUF_FLUSH_EN                  = 0x0F,
+	QUERY_FLAG_IDN_TW_FLUSH_DURING_HIBERN           = 0x10,
+#endif
+#if defined (CONFIG_UFSRINGBUF)
+	QUERY_FLAG_IDN_CMD_HISTORY_RECORD_EN		= 0x12,
+#endif
 };
 
 /* Attribute idn for Query requests */
@@ -56,6 +68,23 @@ enum attr_idn {
 	QUERY_ATTR_IDN_CURR_WB_BUFF_SIZE        = 0x1F,
 	/* use one reserved bit */
 	QUERY_ATTR_IDN_MANUAL_GC_STATUS         = 0x17,
+#if defined(CONFIG_UFSTW_31)
+	QUERY_ATTR_IDN_TW_FLUSH_STATUS          = 0x1C,
+	QUERY_ATTR_IDN_TW_AVAIL_BUF_SIZE        = 0x1D,
+	QUERY_ATTR_IDN_TW_BUF_LIFETIME_EST      = 0x1E,
+	QUERY_ATTR_IDN_TW_CURR_BUF_SIZE         = 0x1F,
+#endif
+#if defined(CONFIG_UFSHID)
+	QUERY_ATTR_IDN_HID_OPERATION		= 0x20,
+	QUERY_ATTR_IDN_HID_FRAG_LEVEL		= 0x21,
+#endif
+#if defined (CONFIG_UFSRINGBUF)
+	QUERY_ATTR_IDN_RINGBUF_RTCA		= 0x22,
+	QUERY_ATTR_IDN_RINGBUF_RTCB		= 0x23,
+#endif
+#if defined(CONFIG_UFSFEATURE) || defined(CONFIG_UFSFEATURE_31)
+	QUERY_ATTR_IDN_SUP_VENDOR_OPTIONS       = 0xFF,
+#endif
 };
 
 #define QUERY_ATTR_IDN_BOOT_LU_EN_MAX	0x02

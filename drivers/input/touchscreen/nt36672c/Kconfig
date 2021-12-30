@@ -10,8 +10,37 @@ config TOUCHSCREEN_NT36xxx_HOSTDL_SPI
 
 	  If unsure, say N.
 
-config TOUCHSCREEN_NVT_DEBUG_FS
-	tristate "Touch debug interface"
+config TOUCHSCREEN_NT36xxx_DEBUG_FS
+	bool "Touch debug interface"
 	depends on DEBUG_FS
+	depends on TOUCHSCREEN_NT36xxx_HOSTDL_SPI
 	help
 	  Control IRQ,suspend,sensor,debug firmware,etc.
+
+config TOUCHSCREEN_NT36xxx_DEBUG
+	bool "NVT Debug"
+	depends on TOUCHSCREEN_NT36xxx_HOSTDL_SPI
+	default n
+	help
+	  Control Debugging variables
+
+config TOUCHSCREEN_NT36xxx_MP
+	bool "NVT MP"
+	depends on TOUCHSCREEN_NT36xxx_HOSTDL_SPI
+	default n
+	help
+	  Control NVT MP Selftesting
+
+config TOUCHSCREEN_NT36xxx_MP_FROM_CSV
+	bool "NVT MP Set Criteria from CSV"
+	depends on TOUCHSCREEN_NT36xxx_MP
+	default n
+	help
+	  MP Criteria from CSV
+
+config TOUCHSCREEN_NT36xxx_MP_SAVE_FILE
+	bool "NVT MP Save To File"
+	depends on TOUCHSCREEN_NT36xxx_MP
+	default n
+	help
+	  Control NVT MP Selftesting Safe to file

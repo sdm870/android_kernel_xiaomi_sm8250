@@ -212,7 +212,7 @@ struct fts_ts_data {
 	struct notifier_block bl_notif;
 	struct work_struct power_supply_work;
 	int is_usb_exist;
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 	int fod_status;
 	bool finger_in_fod;
 	bool fod_finger_skip;
@@ -222,7 +222,7 @@ struct fts_ts_data {
 #endif
 	struct class *fts_tp_class;
 	struct device *fts_touch_dev;
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE))
 	u8 palm_sensor_switch;
 	bool palm_sensor_changed;
 	bool gamemode_enabled;
@@ -260,26 +260,26 @@ int fts_gesture_readdata(struct fts_ts_data *ts_data);
 int fts_gesture_suspend(struct i2c_client *i2c_client);
 int fts_gesture_resume(struct i2c_client *client);
 int fts_gesture_reg_write(struct i2c_client *client, u8 mask, bool enable);
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_FOD))
 int fts_fod_reg_write(struct i2c_client *client, u8 mask, bool enable);
 void fts_fod_recovery(struct i2c_client *client);
 #endif
 #endif
 
 /* Apk and functions */
-#if FTS_APK_NODE_EN
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_DEBUG))
 int fts_create_apk_debug_channel(struct fts_ts_data *);
 void fts_release_apk_debug_channel(struct fts_ts_data *);
 #endif
 
 /* ADB functions */
-#if FTS_SYSFS_NODE_EN
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_DEBUG))
 int fts_create_sysfs(struct i2c_client *client);
 int fts_remove_sysfs(struct i2c_client *client);
 #endif
 
 /* ESD */
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_ESDCHECK))
 int fts_esdcheck_init(struct fts_ts_data *ts_data);
 int fts_esdcheck_exit(struct fts_ts_data *ts_data);
 int fts_esdcheck_switch(bool enable);
@@ -290,13 +290,13 @@ int fts_esdcheck_resume(void);
 #endif
 
 /* Production test */
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST)
+#if (IS_ENABLED(CONFIG_TOUCHSCREEN_FTS_TEST))
 int fts_test_init(struct i2c_client *client);
 int fts_test_exit(struct i2c_client *client);
 #endif
 
 /* Point Report Check*/
-#if IS_ENABLED(FTS_POINT_REPORT_CHECK_EN)
+#if (IS_ENABLED(FTS_POINT_REPORT_CHECK_EN))
 int fts_point_report_check_init(struct fts_ts_data *ts_data);
 int fts_point_report_check_exit(struct fts_ts_data *ts_data);
 void fts_prc_queue_work(struct fts_ts_data *ts_data);

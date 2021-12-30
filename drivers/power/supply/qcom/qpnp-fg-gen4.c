@@ -4765,12 +4765,8 @@ static int fg_psy_get_property(struct power_supply *psy,
 #ifdef CONFIG_BATT_VERIFY_BY_DS28E16
 	union power_supply_propval b_val = {0, };
 
-	if (fg->max_verify_psy == NULL) {
+	if (fg->max_verify_psy == NULL)
 		fg->max_verify_psy = power_supply_get_by_name("batt_verify");
-		if (fg->max_verify_psy == NULL) {
-			pr_err("max_verify_psy is NULL\n");
-		}
-	}
 #endif
 
 	switch (psp) {

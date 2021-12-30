@@ -1024,6 +1024,7 @@ void rndis_set_max_pkt_xfer(struct rndis_params *params, u8 max_pkt_per_xfer)
 
 	params->max_pkt_per_xfer = max_pkt_per_xfer;
 }
+EXPORT_SYMBOL_GPL(rndis_set_max_pkt_xfer);
 
 /**
  * rndis_flow_control: enable/disable flow control with USB RNDIS interface
@@ -1067,6 +1068,7 @@ void rndis_flow_control(struct rndis_params *params, bool enable_flow_control)
 		params->state = RNDIS_DATA_INITIALIZED;
 	}
 }
+EXPORT_SYMBOL_GPL(rndis_flow_control);
 
 void rndis_add_hdr(struct sk_buff *skb)
 {
@@ -1209,6 +1211,7 @@ void rndis_set_pkt_alignment_factor(struct rndis_params *params,
 
 	params->pkt_alignment_factor = pkt_alignment_factor;
 }
+EXPORT_SYMBOL_GPL(rndis_set_pkt_alignment_factor);
 
 #ifdef CONFIG_USB_GADGET_DEBUG_FILES
 
@@ -1304,3 +1307,6 @@ static const struct file_operations rndis_proc_fops = {
 #define	NAME_TEMPLATE "driver/rndis-%03d"
 
 #endif /* CONFIG_USB_GADGET_DEBUG_FILES */
+
+MODULE_DESCRIPTION("Remote NDIS USB Gadget driver");
+MODULE_LICENSE("GPL v2");

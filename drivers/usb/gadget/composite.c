@@ -3,7 +3,6 @@
  * composite.c - infrastructure for Composite USB Gadgets
  *
  * Copyright (C) 2006-2008 David Brownell
- * Copyright (C) 2021 XiaoMi, Inc.
  */
 
 /* #define VERBOSE_DEBUG */
@@ -314,7 +313,7 @@ int usb_add_function(struct usb_configuration *config,
 {
 	int	value = -EINVAL;
 
-	pr_err("usb_add_function adding '%s'/%pK to config '%s'/%pK\n",
+	DBG(config->cdev, "adding '%s'/%pK to config '%s'/%pK\n",
 			function->name, function,
 			config->label, config);
 
@@ -357,7 +356,7 @@ int usb_add_function(struct usb_configuration *config,
 
 done:
 	if (value)
-		pr_err("usb_add_function adding '%s'/%pK --> %d\n",
+		DBG(config->cdev, "adding '%s'/%pK --> %d\n",
 				function->name, function, value);
 	return value;
 }
@@ -496,12 +495,12 @@ static int usb_func_wakeup_int(struct usb_function *func)
 	int ret;
 	struct usb_gadget *gadget;
 
-	pr_debug("%s - %s function wakeup\n",
-		__func__, func->name ? func->name : "");
-
 	if (!func || !func->config || !func->config->cdev ||
 		!func->config->cdev->gadget)
 		return -EINVAL;
+
+	pr_debug("%s - %s function wakeup\n",
+		__func__, func->name ? func->name : "");
 
 	gadget = func->config->cdev->gadget;
 	if ((gadget->speed != USB_SPEED_SUPER) || !func->func_wakeup_allowed) {
@@ -518,10 +517,19 @@ static int usb_func_wakeup_int(struct usb_function *func)
 	return ret;
 }
 
+/**
+ * usb_func_wakeup - wakes up a composite device function.
+ * @func: composite device function to wake up.
+ *
+ * Returns 0 on success or a negative error value.
+ */
 int usb_func_wakeup(struct usb_function *func)
 {
 	int ret;
 	unsigned long flags;
+
+	if (!func || !func->config || !func->config->cdev)
+		return -EINVAL;
 
 	pr_debug("%s function wakeup\n",
 		func->name ? func->name : "");
@@ -544,6 +552,18 @@ int usb_func_wakeup(struct usb_function *func)
 }
 EXPORT_SYMBOL(usb_func_wakeup);
 
+/**
+ * usb_func_ep_queue - queues (submits) an I/O request to a function endpoint.
+ * This function is similar to the usb_ep_queue function, but in addition it
+ * also checks whether the function is in Super Speed USB Function Suspend
+ * state, and if so a Function Wake notification is sent to the host
+ * (USB 3.0 spec, section 9.2.5.2).
+ * @func: the function which issues the USB I/O request.
+ * @ep:the endpoint associated with the request
+ * @req:the request being submitted
+ * @gfp_flags: GFP_* flags to use in case the lower level driver couldn't
+ * pre-allocate all necessary memory with the request.
+ */
 int usb_func_ep_queue(struct usb_function *func, struct usb_ep *ep,
 			       struct usb_request *req, gfp_t gfp_flags)
 {
@@ -1759,6 +1779,18 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	struct usb_function		*f = NULL;
 	u8				endp;
 
+	if (w_length > USB_COMP_EP0_BUFSIZ) {
+		if (ctrl->bRequestType & USB_DIR_IN) {
+			/* Cast away the const, we are going to overwrite on purpose. */
+			__le16 *temp = (__le16 *)&ctrl->wLength;
+
+			*temp = cpu_to_le16(USB_COMP_EP0_BUFSIZ);
+			w_length = USB_COMP_EP0_BUFSIZ;
+		} else {
+			goto done;
+		}
+	}
+
 	/* partial re-init of the response message; the function or the
 	 * gadget might need to intercept e.g. a control-OUT completion
 	 * when we delegate to it.
@@ -2300,7 +2332,7 @@ int composite_dev_prepare(struct usb_composite_driver *composite,
 	if (!cdev->req)
 		return -ENOMEM;
 
-	cdev->req->buf = kmalloc(USB_COMP_EP0_BUFSIZ +
+	cdev->req->buf = kzalloc(USB_COMP_EP0_BUFSIZ +
 				(gadget->extra_buf_alloc), GFP_KERNEL);
 	if (!cdev->req->buf)
 		goto fail;

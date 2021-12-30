@@ -3,7 +3,6 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.h
  * Copyright (C) 2011-2013 Samsung India Software Operations
- * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  *
  * Authors:
@@ -71,6 +70,7 @@
 #include <scsi/scsi_tcq.h>
 #include <scsi/scsi_dbg.h>
 #include <scsi/scsi_eh.h>
+#include <linux/android_kabi.h>
 
 #include <linux/fault-inject.h>
 
@@ -90,29 +90,6 @@ enum dev_cmd_type {
 	DEV_CMD_TYPE_QUERY		= 0x1,
 };
 
-#define ufs_spin_lock_irqsave(lock, flags)				\
-do {	\
-	if (!oops_in_progress)\
-		spin_lock_irqsave(lock, flags);	\
-} while (0)
-
-#define ufs_spin_unlock_irqrestore(lock, flags)				\
-do {	\
-	if (!oops_in_progress)\
-		spin_unlock_irqrestore(lock, flags);	\
-} while (0)
-
-#define ufs_spin_lock(lock)				\
-do {	\
-	if (!oops_in_progress)\
-		spin_lock(lock);	\
-} while (0)
-
-#define ufs_spin_unlock(lock)				\
-do {	\
-	if (!oops_in_progress)\
-		spin_unlock(lock);	\
-} while (0)
 /**
  * struct uic_command - UIC command structure
  * @command: UIC command
@@ -170,7 +147,6 @@ enum {
 	UFS_ERR_CLEAR_PEND_XFER_TM,
 	UFS_ERR_INT_FATAL_ERRORS,
 	UFS_ERR_INT_UIC_ERROR,
-	UFS_ERR_CRYPTO_ENGINE,
 	UFS_ERR_HOST_RESET,
 
 	/* other errors */
@@ -406,6 +382,11 @@ struct ufs_hba_variant_ops {
 #endif
 	int	(*program_key)(struct ufs_hba *hba,
 			       const union ufs_crypto_cfg_entry *cfg, int slot);
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 };
 
 /**
@@ -426,6 +407,24 @@ struct ufs_hba_variant {
 	const char				*name;
 	struct ufs_hba_variant_ops		*vops;
 	struct ufs_hba_pm_qos_variant_ops	*pm_qos_vops;
+};
+
+/* for manual gc */
+enum {
+	MANUAL_GC_OFF = 0,
+	MANUAL_GC_ON,
+	MANUAL_GC_DISABLE,
+	MANUAL_GC_ENABLE,
+	MANUAL_GC_MAX,
+};
+
+struct ufs_manual_gc {
+	int state;
+	bool hagc_support;
+	struct hrtimer hrtimer;
+	unsigned long delay_ms;
+	struct work_struct hibern8_work;
+	struct workqueue_struct *mgc_workq;
 };
 
 struct keyslot_mgmt_ll_ops;
@@ -449,24 +448,11 @@ struct ufs_hba_crypto_variant_ops {
 				    struct scsi_cmnd *cmd,
 				    struct ufshcd_lrb *lrbp);
 	void *priv;
-};
 
-/* for manual gc */
-enum {
-	MANUAL_GC_OFF = 0,
-	MANUAL_GC_ON,
-	MANUAL_GC_DISABLE,
-	MANUAL_GC_ENABLE,
-	MANUAL_GC_MAX,
-};
-
-struct ufs_manual_gc {
-	int state;
-	bool hagc_support;
-	struct hrtimer hrtimer;
-	unsigned long delay_ms;
-	struct work_struct hibern8_work;
-	struct workqueue_struct *mgc_workq;
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 };
 
 /* clock gating state  */
@@ -512,6 +498,7 @@ struct ufs_clk_gating {
 	struct device_attribute delay_perf_attr;
 	struct device_attribute enable_attr;
 	bool is_enabled;
+	bool gate_wk_in_process;
 	int active_reqs;
 	struct workqueue_struct *clk_gating_workq;
 };
@@ -844,13 +831,6 @@ struct ufshcd_cmd_log {
 	u32 seq_num;
 };
 
-/* UFS card state - hotplug state */
-enum ufshcd_card_state {
-	UFS_CARD_STATE_UNKNOWN	= 0,
-	UFS_CARD_STATE_ONLINE	= 1,
-	UFS_CARD_STATE_OFFLINE	= 2,
-};
-
 /* UFS Slow I/O operation types */
 enum ufshcd_slowio_optype {
 	UFSHCD_SLOWIO_READ = 0,
@@ -1084,11 +1064,12 @@ struct ufs_hba {
 	#define UFSHCD_QUIRK_DME_PEER_GET_FAST_MODE		0x20000
 
 	#define UFSHCD_QUIRK_BROKEN_AUTO_HIBERN8		0x40000
+
 	/*
 	 * This quirk needs to be enabled if the host controller advertises
 	 * inline encryption support but it doesn't work correctly.
 	 */
-	#define UFSHCD_QUIRK_BROKEN_CRYPTO			0x800
+	#define UFSHCD_QUIRK_BROKEN_CRYPTO			0x80000
 
 	unsigned int quirks;	/* Deviations from standard UFSHCI spec. */
 
@@ -1119,14 +1100,13 @@ struct ufs_hba {
 	/* HBA Errors */
 	u32 errors;
 	u32 uic_error;
-	u32 ce_error;	/* crypto engine errors */
 	u32 saved_err;
 	u32 saved_uic_err;
 	u32 saved_ce_err;
+	bool silence_err_logs;
 	bool force_host_reset;
 	bool auto_h8_err;
 	struct ufs_stats ufs_stats;
-	bool silence_err_logs;
 
 	/* Device management request data */
 	struct ufs_dev_cmd dev_cmd;
@@ -1204,11 +1184,12 @@ struct ufs_hba {
 	 * in hibern8 then enable this cap.
 	 */
 #define UFSHCD_CAP_POWER_COLLAPSE_DURING_HIBERN8 (1 << 7)
+
 	/*
 	 * This capability allows the host controller driver to use the
 	 * inline crypto engine, if it is present
 	 */
-#define UFSHCD_CAP_CRYPTO (1 << 7)
+#define UFSHCD_CAP_CRYPTO (1 << 8)
 
 	struct devfreq *devfreq;
 	struct ufs_clk_scaling clk_scaling;
@@ -1237,7 +1218,9 @@ struct ufs_hba {
 	bool phy_init_g4;
 	bool force_g4;
 	bool wb_enabled;
+
 	struct ufs_manual_gc manual_gc;
+
 	/* To monitor slow UFS I/O requests. */
 	u64 slowio_min_us;
 	u64 slowio[UFSHCD_SLOWIO_OP_MAX][UFSHCD_SLOWIO_SYS_MAX];
@@ -1249,6 +1232,11 @@ struct ufs_hba {
 	u32 crypto_cfg_register;
 	struct keyslot_manager *ksm;
 #endif /* CONFIG_SCSI_UFS_CRYPTO */
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 };
 
 static inline void ufshcd_mark_shutdown_ongoing(struct ufs_hba *hba)
@@ -1312,11 +1300,6 @@ static inline bool ufshcd_is_auto_hibern8_supported(struct ufs_hba *hba)
 static inline bool ufshcd_is_auto_hibern8_enabled(struct ufs_hba *hba)
 {
 	return ufshcd_is_auto_hibern8_supported(hba) && !!hba->ahit;
-}
-
-static inline bool ufshcd_is_crypto_supported(struct ufs_hba *hba)
-{
-	return !!(hba->capabilities & MASK_CRYPTO_SUPPORT);
 }
 
 #define ufshcd_writel(hba, val, reg)	\

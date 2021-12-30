@@ -671,3 +671,4 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 		return -ENOIOCTLCMD;
 	}
 }
+EXPORT_SYMBOL(compat_fastrpc_device_ioctl);

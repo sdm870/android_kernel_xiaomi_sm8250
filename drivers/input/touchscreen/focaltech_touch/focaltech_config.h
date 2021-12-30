@@ -137,12 +137,6 @@
 #define FTS_CHARGER_EN                          1
 
 /*
- * Nodes for tools, please keep enable
- */
-#define FTS_SYSFS_NODE_EN                       1
-#define FTS_APK_NODE_EN                         1
-
-/*
  * Pinctrl enable
  * default: disable
  */

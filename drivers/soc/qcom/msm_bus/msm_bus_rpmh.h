@@ -267,18 +267,6 @@ static inline int msm_bus_device_match_adhoc(struct device *dev, void *id)
 	return ret;
 }
 
-#define mbus_rpmh_rt_mutex_lock(lock)				\
-do {	\
-	if (!oops_in_progress)\
-		rt_mutex_lock(lock);	\
-} while (0)
-
-#define mbus_rpmh_rt_mutex_unlock(lock)				\
-do {	\
-	if (!oops_in_progress)\
-		rt_mutex_unlock(lock);	\
-} while (0)
-
 #ifdef CONFIG_DEBUG_BUS_VOTER
 int msm_bus_floor_init(struct device *dev);
 #else

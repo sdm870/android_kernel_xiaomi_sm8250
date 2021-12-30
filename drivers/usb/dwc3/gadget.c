@@ -3,7 +3,6 @@
  * gadget.c - DesignWare USB3 DRD Controller Gadget Framework Link
  *
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
- * Copyright (C) 2021 XiaoMi, Inc.
  *
  * Authors: Felipe Balbi <balbi@ti.com>,
  *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
@@ -31,10 +30,6 @@
 
 #define DWC3_ALIGN_FRAME(d)	(((d)->frame_number + (d)->interval) \
 					& ~((d)->interval - 1))
-#undef dev_dbg
-#define dev_dbg dev_info
-#undef pr_debug
-#define pr_debug pr_info
 
 static void dwc3_gadget_wakeup_interrupt(struct dwc3 *dwc, bool remote_wakeup);
 static int dwc3_gadget_wakeup_int(struct dwc3 *dwc);
@@ -88,6 +83,7 @@ int dwc3_gadget_get_link_state(struct dwc3 *dwc)
 
 	return DWC3_DSTS_USBLNKST(reg);
 }
+EXPORT_SYMBOL_GPL(dwc3_gadget_get_link_state);
 
 /**
  * dwc3_gadget_set_link_state - sets usb link to a particular state
@@ -170,6 +166,7 @@ void dwc3_ep_inc_enq(struct dwc3_ep *dep)
 {
 	dwc3_ep_inc_trb(&dep->trb_enqueue);
 }
+EXPORT_SYMBOL_GPL(dwc3_ep_inc_enq);
 
 /**
  * dwc3_ep_inc_deq - increment endpoint's dequeue pointer
@@ -283,6 +280,7 @@ int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc, struct dwc3_ep *dep)
 							fifo_size);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(dwc3_gadget_resize_tx_fifos);
 
 static void dwc3_gadget_del_and_unmap_request(struct dwc3_ep *dep,
 		struct dwc3_request *req, int status)
@@ -508,6 +506,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(dwc3_send_gadget_ep_cmd);
 
 static int dwc3_send_clear_stall_ep_cmd(struct dwc3_ep *dep)
 {
@@ -840,7 +839,7 @@ static void dwc3_remove_requests(struct dwc3 *dwc, struct dwc3_ep *dep)
 	struct dwc3_request		*req;
 
 	dbg_log_string("START for %s(%d)", dep->name, dep->number);
-	dwc3_stop_active_transfer(dwc, dep->number, true);
+	dwc3_stop_active_transfer(dwc, dep->number, true, false);
 
 	if (dep->number == 0) {
 		unsigned int dir;
@@ -975,10 +974,7 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 
 	trace_dwc3_gadget_ep_disable(dep);
 
-	if (dep->endpoint.ep_type == EP_TYPE_NORMAL)
-		dwc3_remove_requests(dwc, dep);
-	else if (dep->endpoint.ep_type == EP_TYPE_GSI)
-		dwc3_stop_active_transfer(dwc, dep->number, true);
+	dwc3_remove_requests(dwc, dep);
 
 	/* make sure HW endpoint isn't stalled */
 	if (dep->flags & DWC3_EP_STALL)
@@ -1141,19 +1137,19 @@ static struct dwc3_trb *dwc3_ep_prev_trb(struct dwc3_ep *dep, u8 index)
 
 static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)
 {
+	struct dwc3_trb		*tmp;
 	u8			trbs_left;
 
 	/*
-	 * If the enqueue & dequeue are equal then the TRB ring is either full
-	 * or empty. It's considered full when there are DWC3_TRB_NUM-1 of TRBs
-	 * pending to be processed by the driver.
+	 * If enqueue & dequeue are equal than it is either full or empty.
+	 *
+	 * One way to know for sure is if the TRB right before us has HWO bit
+	 * set or not. If it has, then we're definitely full and can't fit any
+	 * more transfers in our ring.
 	 */
 	if (dep->trb_enqueue == dep->trb_dequeue) {
-		/*
-		 * If there is any request remained in the started_list at
-		 * this point, that means there is no TRB available.
-		 */
-		if (!list_empty(&dep->started_list))
+		tmp = dwc3_ep_prev_trb(dep, dep->trb_enqueue);
+		if (!tmp || tmp->ctrl & DWC3_TRB_CTRL_HWO)
 			return 0;
 
 		return DWC3_TRB_NUM - 1;
@@ -1601,7 +1597,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep)
 				dwc3_gadget_ep_get_transfer_index(dep);
 				WARN_ON_ONCE(!dep->resource_index);
 			}
-			dwc3_stop_active_transfer(dwc, dep->number, true);
+			dwc3_stop_active_transfer(dwc, dep->number, true, true);
 
 			list_for_each_entry_safe_reverse(req1, n,
 						&dep->started_list, list) {
@@ -1615,7 +1611,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep)
 		}
 
 		dbg_event(0xFF, "GADGET_EP_CMD Failure", ret);
-		dwc3_stop_active_transfer(dwc, dep->number, true);
+		dwc3_stop_active_transfer(dwc, dep->number, true, true);
 
 		list_for_each_entry_safe(req, n, &dep->started_list, list)
 			dwc3_gadget_move_cancelled_request(req);
@@ -1837,7 +1833,7 @@ static int dwc3_gadget_ep_dequeue(struct usb_ep *ep,
 			struct dwc3_request *t;
 
 			/* wait until it is processed */
-			dwc3_stop_active_transfer(dwc, dep->number, true);
+			dwc3_stop_active_transfer(dwc, dep->number, true, true);
 
 			if (!r->trb)
 				goto out0;
@@ -2079,6 +2075,8 @@ static int dwc3_gadget_wakeup_int(struct dwc3 *dwc)
 	switch (link_state) {
 	case DWC3_LINK_STATE_RX_DET:	/* in HS, means Early Suspend */
 	case DWC3_LINK_STATE_U3:	/* in HS, means SUSPEND */
+	case DWC3_LINK_STATE_U2:	/* in HS, means Sleep (L1) */
+	case DWC3_LINK_STATE_RESUME:
 		break;
 	case DWC3_LINK_STATE_U1:
 		if (dwc->gadget.speed != USB_SPEED_SUPER) {
@@ -2476,7 +2474,7 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 		ret = wait_for_completion_timeout(&dwc->ep0_in_setup,
 				msecs_to_jiffies(DWC3_PULL_UP_TIMEOUT));
 		if (ret == 0)
-			dev_warn(dwc->dev, "timed out waiting for SETUP phase\n");
+			dev_err(dwc->dev, "timed out waiting for SETUP phase\n");
 	}
 
 	/* pull-up disable: clear pending events without queueing bh */
@@ -2561,6 +2559,7 @@ void dwc3_gadget_disable_irq(struct dwc3 *dwc)
 	/* mask all interrupts */
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0x00);
 }
+EXPORT_SYMBOL_GPL(dwc3_gadget_disable_irq);
 
 static irqreturn_t dwc3_thread_interrupt(int irq, void *_dwc);
 
@@ -2717,7 +2716,6 @@ static int __dwc3_gadget_start(struct dwc3 *dwc)
 	dwc->ep0state = EP0_SETUP_PHASE;
 	dwc->ep0_bounced = false;
 	dwc->link_state = DWC3_LINK_STATE_SS_DIS;
-	dwc->delayed_status = false;
 	dwc3_ep0_out_start(dwc);
 
 	dwc3_gadget_enable_irq(dwc);
@@ -2952,8 +2950,6 @@ static int dwc3_gadget_init_endpoint(struct dwc3 *dwc, u8 epnum)
 	INIT_LIST_HEAD(&dep->started_list);
 	INIT_LIST_HEAD(&dep->cancelled_list);
 
-	dwc3_debugfs_create_endpoint_dir(dep);
-
 	return 0;
 }
 
@@ -3025,7 +3021,6 @@ static void dwc3_gadget_free_endpoints(struct dwc3 *dwc)
 			list_del(&dep->endpoint.ep_list);
 		}
 
-		debugfs_remove_recursive(debugfs_lookup(dep->name, dwc->root));
 		kfree(dep);
 	}
 }
@@ -3242,10 +3237,9 @@ static void dwc3_gadget_endpoint_transfer_in_progress(struct dwc3_ep *dep,
 	}
 
 	if (stop)
-		dwc3_stop_active_transfer(dwc, dep->number, true);
+		dwc3_stop_active_transfer(dwc, dep->number, true, true);
 	else if (dwc3_gadget_ep_should_continue(dep))
 		__dwc3_gadget_kick_transfer(dep);
-
 	/*
 	 * WORKAROUND: This is the 2nd half of U1/U2 -> U0 workaround.
 	 * See dwc3_gadget_linksts_change_interrupt() for 1st half.
@@ -3392,7 +3386,8 @@ static void dwc3_reset_gadget(struct dwc3 *dwc)
 	}
 }
 
-void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum, bool force)
+void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum, bool force,
+	bool interrupt)
 {
 	struct dwc3_ep *dep;
 	struct dwc3_gadget_ep_cmd_params params;
@@ -3457,6 +3452,7 @@ void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum, bool force)
 	dbg_log_string("%s(%d): endxfer ret:%d)",
 			dep->name, dep->number, ret);
 }
+EXPORT_SYMBOL_GPL(dwc3_stop_active_transfer);
 
 int dwc3_stop_active_transfer_noioc(struct dwc3 *dwc, u32 epnum, bool force)
 {
@@ -4147,10 +4143,11 @@ static irqreturn_t dwc3_check_event_buf(struct dwc3_event_buffer *evt)
 	u32 reg;
 	ktime_t start_time;
 
-	if (!evt)
+	if(!evt)
 		return IRQ_NONE;
 
 	dwc = evt->dwc;
+
 	start_time = ktime_get();
 	dwc->irq_cnt++;
 
@@ -4386,8 +4383,6 @@ int dwc3_gadget_suspend(struct dwc3 *dwc)
 	dwc3_gadget_run_stop(dwc, false, false);
 	dwc3_disconnect_gadget(dwc);
 	__dwc3_gadget_stop(dwc);
-
-	synchronize_irq(dwc->irq_gadget);
 
 	return 0;
 }
