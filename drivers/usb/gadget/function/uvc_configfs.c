@@ -10,12 +10,9 @@
  * Author: Andrzej Pietrasiewicz <andrzej.p@samsung.com>
  */
 
-#include <linux/sort.h>
-
-#include "u_uvc.h"
 #include "uvc_configfs.h"
 
-#define UVCG_STREAMING_CONTROL_SIZE	1
+#include <linux/sort.h>
 
 #define UVC_ATTR(prefix, cname, aname) \
 static struct configfs_attribute prefix##attr_##cname = { \
@@ -40,26 +37,6 @@ static int uvcg_config_compare_u32(const void *l, const void *r)
 	u32 ri = *(const u32 *)r;
 
 	return li < ri ? -1 : li == ri ? 0 : 1;
-}
-
-static inline struct f_uvc_opts *to_f_uvc_opts(struct config_item *item)
-{
-	return container_of(to_config_group(item), struct f_uvc_opts,
-			    func_inst.group);
-}
-
-/* control/header/<NAME> */
-DECLARE_UVC_HEADER_DESCRIPTOR(1);
-
-struct uvcg_control_header {
-	struct config_item		item;
-	struct UVC_HEADER_DESCRIPTOR(1)	desc;
-	unsigned			linked;
-};
-
-static struct uvcg_control_header *to_uvcg_control_header(struct config_item *item)
-{
-	return container_of(item, struct uvcg_control_header, item);
 }
 
 #define UVCG_CTRL_HDR_ATTR(cname, aname, conv, str2u, uxx, vnoc, limit)	\
@@ -701,25 +678,6 @@ static struct config_item *fmt_parent[] = {
 	&uvcg_h264_grp.group.cg_item,
 };
 
-enum uvcg_format_type {
-	UVCG_UNCOMPRESSED = 0,
-	UVCG_MJPEG,
-	UVCG_H264,
-};
-
-struct uvcg_format {
-	struct config_group	group;
-	enum uvcg_format_type	type;
-	unsigned		linked;
-	unsigned		num_frames;
-	__u8			bmaControls[UVCG_STREAMING_CONTROL_SIZE];
-};
-
-static struct uvcg_format *to_uvcg_format(struct config_item *item)
-{
-	return container_of(to_config_group(item), struct uvcg_format, group);
-}
-
 static ssize_t uvcg_format_bma_controls_show(struct uvcg_format *f, char *page)
 {
 	struct f_uvc_opts *opts;
@@ -776,25 +734,6 @@ end:
 	mutex_unlock(&opts->lock);
 	mutex_unlock(su_mutex);
 	return ret;
-}
-
-struct uvcg_format_ptr {
-	struct uvcg_format	*fmt;
-	struct list_head	entry;
-};
-
-/* streaming/header/<NAME> */
-struct uvcg_streaming_header {
-	struct config_item				item;
-	struct uvc_input_header_descriptor		desc;
-	unsigned					linked;
-	struct list_head				formats;
-	unsigned					num_fmt;
-};
-
-static struct uvcg_streaming_header *to_uvcg_streaming_header(struct config_item *item)
-{
-	return container_of(item, struct uvcg_streaming_header, item);
 }
 
 static int uvcg_streaming_header_allow_link(struct config_item *src,
@@ -986,23 +925,6 @@ static const struct config_item_type uvcg_streaming_header_grp_type = {
 	.ct_group_ops	= &uvcg_streaming_header_grp_ops,
 	.ct_owner	= THIS_MODULE,
 };
-
-/* streaming/<mode>/<format>/<NAME> */
-struct uvcg_frame {
-	union {
-		struct uvc_frame_uncompressed uf;
-		struct uvc_frame_mjpeg mf;
-		struct uvc_frame_h264 hf;
-	} frame;
-	u32 *dw_frame_interval;
-	enum uvcg_format_type	fmt_type;
-	struct config_item	item;
-};
-
-static struct uvcg_frame *to_uvcg_frame(struct config_item *item)
-{
-	return container_of(item, struct uvcg_frame, item);
-}
 
 #define UVCG_FRAME_ATTR(cname, fname, to_cpu_endian, to_little_endian, bits) \
 static ssize_t uvcg_frame_##fname##_##cname##_show(struct config_item *item, \
@@ -1404,19 +1326,6 @@ static void uvcg_frame_drop(struct config_group *group, struct config_item *item
 	mutex_unlock(&opts->lock);
 }
 
-/* streaming/uncompressed/<NAME> */
-struct uvcg_uncompressed {
-	struct uvcg_format		fmt;
-	struct uvc_format_uncompressed	desc;
-};
-
-static struct uvcg_uncompressed *to_uvcg_uncompressed(struct config_item *item)
-{
-	return container_of(
-		container_of(to_config_group(item), struct uvcg_format, group),
-		struct uvcg_uncompressed, fmt);
-}
-
 static struct configfs_group_operations uvcg_uncompressed_group_ops = {
 	.make_item		= uvcg_frame_make,
 	.drop_item		= uvcg_frame_drop,
@@ -1660,19 +1569,6 @@ static const struct config_item_type uvcg_uncompressed_grp_type = {
 	.ct_group_ops	= &uvcg_uncompressed_grp_ops,
 	.ct_owner	= THIS_MODULE,
 };
-
-/* streaming/mjpeg/<NAME> */
-struct uvcg_mjpeg {
-	struct uvcg_format		fmt;
-	struct uvc_format_mjpeg		desc;
-};
-
-static struct uvcg_mjpeg *to_uvcg_mjpeg(struct config_item *item)
-{
-	return container_of(
-		container_of(to_config_group(item), struct uvcg_format, group),
-		struct uvcg_mjpeg, fmt);
-}
 
 static struct configfs_group_operations uvcg_mjpeg_group_ops = {
 	.make_item		= uvcg_frame_make,
